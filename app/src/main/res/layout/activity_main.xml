@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- 主内容区域 -->
+    <LinearLayout
+        android:id="@+id/mainContent"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- 录制视频按钮 -->
+        <Button
+            android:id="@+id/btn_record_video"
+            android:layout_marginTop="20dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="录制视频" />
+
+        <!-- 开始/停止心电记录按钮 -->
+        <Button
+            android:id="@+id/btn_start_ecg"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="心电开始" />
+
+        <!-- 开始/停止指环记录按钮 -->
+        <Button
+            android:id="@+id/btn_start_ring"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="指环开始" />
+
+        <!-- 水平 LinearLayout 用于左右并排显示数据 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="16dp">
+
+            <!-- 心电数据显示的 ScrollView -->
+            <ScrollView
+                android:layout_width="0dp"
+                android:layout_height="500dp"
+                android:layout_weight="1"
+                android:background="#E0E0E0"
+                android:padding="10dp">
+                <TextView
+                    android:id="@+id/tv_ecg_data"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="心电数据"
+                    android:textSize="16sp" />
+            </ScrollView>
+
+            <!-- 指环数据显示的 ScrollView -->
+            <ScrollView
+                android:layout_width="0dp"
+                android:layout_height="500dp"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:background="#E0E0E0"
+                android:padding="10dp">
+                <TextView
+                    android:id="@+id/tv_ring_data"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="指环数据"
+                    android:textSize="16sp" />
+            </ScrollView>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 右下角的 Settings 按钮 -->
+    <Button
+        android:id="@+id/btn_settings"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="设置"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="16dp" />
+    <Button
+        android:id="@+id/btn_Timestamp"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="时间戳"
+        android:layout_gravity="bottom|start"
+        android:layout_margin="16dp" />
+</FrameLayout>

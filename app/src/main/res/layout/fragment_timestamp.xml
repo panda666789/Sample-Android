@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- 添加标签区域 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+        <EditText
+            android:id="@+id/et_new_label"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:hint="输入标签" />
+        <Button
+            android:id="@+id/btn_add_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="添加" />
+    </LinearLayout>
+
+    <!-- 标签列表，用于展示已添加标签 -->
+    <ListView
+        android:id="@+id/lv_labels"
+        android:layout_width="match_parent"
+        android:layout_height="200dp"
+        android:layout_marginTop="8dp" />
+
+    <!-- 预览区域，显示所有记录的事件，包裹在 ScrollView 中 -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="150dp"
+        android:layout_marginTop="8dp"
+        android:background="#EEEEEE"
+        android:padding="8dp">
+        <TextView
+            android:id="@+id/tv_preview"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="预览区" />
+    </ScrollView>
+
+    <!-- 保存按钮 -->
+    <Button
+        android:id="@+id/btn_save_records"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="保存记录"
+        android:layout_marginTop="8dp" />
+</LinearLayout>
