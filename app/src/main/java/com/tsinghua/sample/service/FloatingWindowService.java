@@ -21,6 +21,7 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 import com.petterp.floatingx.FloatingX;
 import com.petterp.floatingx.assist.FxScopeType;
@@ -71,12 +72,13 @@ public class FloatingWindowService extends Service {
             multiMicAudioRecorderHelper = new MultiMicAudioRecorderHelper();
             surfaceViewBack.setOnClickListener(view->{
                 recordingBorder.setBackgroundColor(Color.GREEN); // 录制中显示绿色
-
                 imuRecorder.startRecording();
                 multiMicAudioRecorderHelper.startRecording();
                 cameraHelper.startRecording();
                 surfaceViewBack.setClickable(false);
-
+                Intent intent = new Intent("com.tsinghua.UPDATE_TEXT_VIEW");
+                intent.putExtra("newText", "结束录制");
+                LocalBroadcastManager.getInstance(context).sendBroadcast(intent);
             });
         }, 1000); // 延迟 1 秒
 

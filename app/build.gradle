@@ -1,11 +1,12 @@
 plugins {
     alias(libs.plugins.android.application)
 }
-
 android {
     namespace 'com.tsinghua.sample'
     compileSdk 34
-
+    buildFeatures {
+        buildConfig = true  // Disable BuildConfig generation
+    }
     defaultConfig {
         applicationId "com.tsinghua.sample"
         minSdk 24
@@ -20,6 +21,15 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+
+    }
+    buildTypes {
+        debug {
+            buildConfigField "String", "API_BASE_URL", "\"${project.hasProperty('API_BASE_URL') ? project.API_BASE_URL : 'http://default.url'}\""
+        }
+        release {
+            buildConfigField "String", "API_BASE_URL", "\"${project.hasProperty('API_BASE_URL') ? project.API_BASE_URL : 'http://default.url'}\""
         }
     }
     compileOptions {
@@ -39,8 +49,10 @@ dependencies {
     androidTestImplementation libs.espresso.core
     //local libraries
     implementation fileTree(dir: 'libs', include: ['*.jar', '*.aar'])
+    implementation 'com.github.NaikSoftware:StompProtocolAndroid:1.6.6'
 
     implementation "io.reactivex.rxjava3:rxjava:3.1.2"
+    implementation 'com.squareup.okhttp3:okhttp:4.9.3'
 
     //for sdk dependencies
     //gson
@@ -64,6 +76,7 @@ dependencies {
     implementation 'androidx.room:room-runtime:2.4.2'
     implementation 'androidx.appcompat:appcompat:1.3.0'
     annotationProcessor 'androidx.room:room-compiler:2.4.2'
+    implementation 'com.github.AAChartModel:AAChartCore:7.2.0'
 
     //nordic ble library
     implementation "no.nordicsemi.android:ble:2.5.1"

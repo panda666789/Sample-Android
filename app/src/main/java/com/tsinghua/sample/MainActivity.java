@@ -16,6 +16,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
@@ -24,7 +25,9 @@ import android.os.Looper;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.Log;
+import android.view.View;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -37,8 +40,29 @@ import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.fragment.app.Fragment;
+import androidx.fragment.app.FragmentManager;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
+import com.github.AAChartModel.AAChartCore.AAChartCreator.AAChartModel;
+import com.github.AAChartModel.AAChartCore.AAChartCreator.AAChartView;
+import com.github.AAChartModel.AAChartCore.AAChartCreator.AASeriesElement;
+import com.github.AAChartModel.AAChartCore.AAChartEnum.AAChartAnimationType;
+import com.github.AAChartModel.AAChartCore.AAChartEnum.AAChartType;
+import com.github.AAChartModel.AAChartCore.AAOptionsModel.AAScrollablePlotArea;
+import com.google.gson.Gson;
+import com.google.gson.internal.LinkedTreeMap;
 import com.lm.sdk.inter.IResponseListener;
+import com.petterp.floatingx.FloatingX;
+import com.tsinghua.sample.media.CameraHelper;
+import com.tsinghua.sample.media.IMURecorder;
+import com.tsinghua.sample.media.MultiMicAudioRecorderHelper;
+import com.tsinghua.sample.model.ApiResponse;
+import com.tsinghua.sample.model.User;
+import com.tsinghua.sample.model.UserInfoRequest;
+import com.tsinghua.sample.network.ApiService;
+import com.tsinghua.sample.network.AuthInterceptor;
+import com.tsinghua.sample.network.WebSocketManager;
 import com.tsinghua.sample.service.FloatingWindowService;
 import com.tsinghua.sample.utils.NotificationHandler;
 import com.tsinghua.sample.utils.VivaLink;
@@ -65,6 +89,14 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 
+import okhttp3.OkHttpClient;
+import retrofit2.Call;
+import retrofit2.Callback;
+import retrofit2.Response;
+import retrofit2.Retrofit;
+import retrofit2.converter.gson.GsonConverterFactory;
+
+
 public class MainActivity extends AppCompatActivity implements IResponseListener {
     private static final int REQUEST_CODE_OVERLAY_PERMISSION = 100;
     public static boolean isRecordingECG = false;
@@ -73,22 +105,35 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
 
     public static boolean isRecordingVideo = false;
     private TextView tvEcgData;
-    private Button btnStartEcg, btnStartRing, btnRecordVideo;
+    private Button btnStartEcg, btnStartRing, btnRecordVideo,btnScanECG,btnScanRing;
     private static final int PERMISSION_REQUEST_CODE = 100;  // Permission request code
     private TextView tvLMAPILog;
     private BufferedWriter logWriter = null;
     public static BufferedWriter logWriterECG = null;
+    private AAChartView chartViewACC,chartViewECG,chartViewGIR,chartViewIMU;
 
-    static String mac = "EA:36:19:43:DA:8A";
+    private WebSocketManager webSocketManager;
+    private String jwtToken; // 这里替换为后端返回的真实 JWT
+    public static User user;
+    private ApiService apiService;
+    private Retrofit retrofit;
+    private Context context = this;
+    String BASE_URL = com.tsinghua.sample.BuildConfig.API_BASE_URL;
+    String API_URL = BASE_URL;
+    private BroadcastReceiver updateTextViewReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+                btnRecordVideo.setText("结束录制"); // 确保 btnRecordVideo 已初始化
+        }
+    };
     private BluetoothAdapter.LeScanCallback leScanCallback = new BluetoothAdapter.LeScanCallback() {
         @Override
         public void onLeScan(BluetoothDevice device, int rssi, byte[] bytes) {
             if (device == null || TextUtils.isEmpty(device.getName())) {
                 return;
             }
-            //是否符合条件，符合条件，会返回戒指设备信息
             BleDeviceInfo bleDeviceInfo = LogicalApi.getBleDeviceInfoWhenBleScan(device, rssi, bytes);
-            Log.e("Vivalnk",bleDeviceInfo.toString());
+            Log.e("RingLog",bleDeviceInfo.toString());
         }
     };
     private final BroadcastReceiver broadcastReceiver = new BroadcastReceiver() {
@@ -115,10 +160,9 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
         // 将日志显示到TextView中（确保在UI线程执行）
         runOnUiThread(() -> {
             if(tvLMAPILog != null){
-                tvLMAPILog.append(logMessage + "\n");
+                tvLMAPILog.setText(logMessage);
             }
         });
-
         // 如果正在记录，则写入文件
         if (isRecordingRing && logWriter != null) {
             try {
@@ -132,19 +176,58 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        SharedPreferences preferences = this.getSharedPreferences("UserPrefs", Context.MODE_PRIVATE);
+        user = new User();
+        jwtToken = preferences.getString("jwt_token", null);
+        OkHttpClient client = new OkHttpClient.Builder()
+                .addInterceptor(new AuthInterceptor(this))
+                .build();
+
+        // 初始化 Retrofit
+        retrofit = new Retrofit.Builder()
+                .baseUrl(API_URL)
+                .addConverterFactory(GsonConverterFactory.create())
+                .client(client) // 这里添加 OkHttp 客户端
+                .build();
+
+        apiService = retrofit.create(ApiService.class);
+        webSocketManager = WebSocketManager.getInstance(context);
+
+        user.setUsername(preferences.getString("username",null));
+        UserInfo(user.getUsername());
+
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
         Button btnSettings = findViewById(R.id.btn_settings);
-
+        btnScanECG = findViewById(R.id.btn_scanECG);
+        btnScanRing = findViewById(R.id.btn_scanRing);
         btnSettings.setOnClickListener(v -> {
             startActivity(new Intent(MainActivity.this, SettingsActivity.class));
         });
         Button btnTimeStamp = findViewById(R.id.btn_Timestamp);
 
         btnTimeStamp.setOnClickListener(v -> {
-            TimestampFragment timestampFragment = new TimestampFragment();
-            timestampFragment.show(getSupportFragmentManager(), "TimestampFragment");
+            FragmentManager fm = getSupportFragmentManager();
+            TimestampFragment fragment = (TimestampFragment) fm.findFragmentByTag("TimestampFragment");
+
+            if (fragment == null) {
+                fragment = new TimestampFragment(); // 仅在 Fragment 为空时创建新实例
+            }
+
+            fragment.show(fm, "TimestampFragment");
         });
+        btnScanECG.setOnClickListener(v -> {
+            startScan(this);
+        });
+        btnScanRing.setOnClickListener(v->{
+            SharedPreferences prefs = getSharedPreferences("AppSettings", MODE_PRIVATE);
+            String mac = prefs.getString("mac_address", "");
+            BluetoothDevice remote = BluetoothAdapter.getDefaultAdapter().getRemoteDevice(mac);
+            if(remote != null){
+                BLEUtils.connectLockByBLE(this,remote);
+            }
+        });
+
         if (ProcessUtils.isMainProcess(this)) {
             VitalClient.getInstance().init(this);
             if (BuildConfig.DEBUG) {
@@ -160,8 +243,6 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
                     Toast.LENGTH_LONG).show();
         }
         checkPermissions();
-        tvLMAPILog = findViewById(R.id.tv_ring_data);
-
         LmAPI.init(this.getApplication());
         LmAPI.setDebug(true);
         LmAPI.addWLSCmdListener(this, this);
@@ -191,14 +272,8 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
                 return;
             }
         }
-        Log.e("ConnectDevice","mac :"+mac);
-        BluetoothDevice remote = BluetoothAdapter.getDefaultAdapter().getRemoteDevice(mac);
-        if(remote != null){
-            BLEUtils.connectLockByBLE(this,remote);
-            Log.e("ConnectDevice","蓝牙已连接");
-        }
-        startScan(this);
-
+        LocalBroadcastManager.getInstance(this)
+                .registerReceiver(updateTextViewReceiver, new IntentFilter("com.tsinghua.UPDATE_TEXT_VIEW"));
         btnRecordVideo = findViewById(R.id.btn_record_video);
         btnStartEcg = findViewById(R.id.btn_start_ecg);
         btnStartRing = findViewById(R.id.btn_start_ring);
@@ -226,6 +301,166 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
                 stopRingRecording();
             }
         });
+        setUpChart();
+    }
+    private void setUpChart(){
+        tvLMAPILog = findViewById(R.id.tv_ring_data);
+        chartViewACC = findViewById(R.id.chartViewForACC);
+        chartViewECG = findViewById(R.id.chartViewForECG);
+        chartViewGIR = findViewById(R.id.chartViewForGIR);
+        chartViewIMU = findViewById(R.id.chartViewForIMU);
+        AASeriesElement ECGSeries = new AASeriesElement()
+                .name("ECG")
+                .data(new Object[]{0});
+        AASeriesElement greenSeries = new AASeriesElement()
+                .name("green")
+                .color("#00FF00")
+                .data(new Object[]{0});
+
+        AASeriesElement irSeries = new AASeriesElement()
+                .name("ir")
+                .color("#0000FF")
+                .data(new Object[]{0});
+
+        AASeriesElement redSeries = new AASeriesElement()
+                .name("red")
+                .color("#FF0000")
+                .data(new Object[]{0});
+        AASeriesElement xSeries = new AASeriesElement()
+                .name("x")
+                .data(new Object[]{0});
+
+        AASeriesElement ySeries = new AASeriesElement()
+                .name("y")
+                .data(new Object[]{0});
+
+        AASeriesElement zSeries = new AASeriesElement()
+                .name("z")
+                .data(new Object[]{0});
+        AAChartModel aaChartModelECG = new AAChartModel()
+                .chartType(AAChartType.Spline) // 选择折线图
+                .markerRadius(0)
+                .animationType(AAChartAnimationType.EaseTo)
+                .xAxisLabelsEnabled(false)
+                .scrollablePlotArea(new AAScrollablePlotArea()
+                        .minWidth(800)
+                        .minHeight(400)
+                        .opacity(0.8f)
+                        .scrollPositionX(1)
+                        .scrollPositionY(1))
+                .series(new AASeriesElement[]{ECGSeries})
+                .dataLabelsEnabled(false);
+        chartViewECG.aa_drawChartWithChartModel(aaChartModelECG);
+        AAChartModel aaChartModelACC = new AAChartModel()
+                .chartType(AAChartType.Spline) // 选择折线图
+                .markerRadius(0)
+                .animationType(AAChartAnimationType.EaseTo)
+                .xAxisLabelsEnabled(false)
+                .scrollablePlotArea(new AAScrollablePlotArea()
+                        .minWidth(800)
+                        .minHeight(400)
+                        .opacity(0.8f)
+                        .scrollPositionX(1)
+                        .scrollPositionY(1))
+                .series(new AASeriesElement[]{xSeries,ySeries,zSeries})
+                .dataLabelsEnabled(false);
+        chartViewACC.aa_drawChartWithChartModel(aaChartModelACC);
+        VivaLink.setAAChartViewAcc(chartViewACC);
+        VivaLink.setAAChartViewECG(chartViewECG);
+        SharedPreferences prefs = getSharedPreferences("AppSettings", MODE_PRIVATE);
+        int savedYAxisMin = prefs.getInt("y_axis_min", 0);
+
+        AAChartModel aaChartModelGIR = new AAChartModel()
+                .chartType(AAChartType.Spline) // 选择折线图
+                .markerRadius(0)
+                .yAxisMin(savedYAxisMin)
+                .animationType(AAChartAnimationType.EaseTo)
+                .xAxisLabelsEnabled(false)
+                .scrollablePlotArea(new AAScrollablePlotArea()
+                        .minWidth(800)
+                        .minHeight(400)
+                        .opacity(1f)
+                        .scrollPositionX(1)
+                        .scrollPositionY(1))
+                .series(new AASeriesElement[]{greenSeries, irSeries, redSeries})
+                .dataLabelsEnabled(false);
+        chartViewGIR.aa_drawChartWithChartModel(aaChartModelGIR);
+        AAChartModel aaChartModelIMU = new AAChartModel()
+                .chartType(AAChartType.Spline) // 选择折线图
+                .markerRadius(0)
+                .xAxisLabelsEnabled(false)
+                .scrollablePlotArea(new AAScrollablePlotArea()
+                        .minWidth(800)
+                        .minHeight(400)
+                        .opacity(1f)
+                        .scrollPositionX(1)
+                        .scrollPositionY(1))
+                .series(new AASeriesElement[]{xSeries, ySeries, zSeries})
+                .dataLabelsEnabled(false);
+        chartViewIMU.aa_drawChartWithChartModel(aaChartModelIMU);
+        NotificationHandler.setAAChartView(chartViewGIR);
+        NotificationHandler.setAAChartViewXYZ(chartViewIMU);
+    }
+    private void UserInfo(final String usernameOrPhone) {
+        UserInfoRequest userInfoRequest = new UserInfoRequest();
+        userInfoRequest.setUsernameOrPhone(usernameOrPhone);
+
+        Call<ApiResponse> userInfoCall = apiService.getUserInfo(userInfoRequest.getUsernameOrPhone());
+
+        userInfoCall.enqueue(new Callback<ApiResponse>() {
+            @Override
+            public void onResponse(Call<ApiResponse> call, Response<ApiResponse> response) {
+                if (response.isSuccessful() && response.body() != null) {
+                    ApiResponse apiResponse = response.body();
+                    if (apiResponse.getStatusCode() == 200) {
+                        User tempUser = null;
+                        Object data = apiResponse.getData();
+                        if (data instanceof LinkedTreeMap) {
+                            Gson gson = new Gson();
+                            String json = gson.toJson(data); // 先转成 JSON 字符串
+                            tempUser = gson.fromJson(json, User.class); // 再解析成 User 对象
+                        }
+                        user.setId(tempUser.getId());
+                        webSocketManager.connectWebSocket(jwtToken);
+
+                        Toast.makeText(context, "获取用户信息成功", Toast.LENGTH_SHORT).show();
+                    } else {
+                        SharedPreferences preferences = getSharedPreferences("UserPrefs", MODE_PRIVATE);
+                        SharedPreferences.Editor editor = preferences.edit();
+                        editor.clear();
+                        editor.apply();
+
+                        Intent intent = new Intent(context, LoginRegisterActivity.class);
+                        startActivity(intent);
+                        finish();
+                        Toast.makeText(context, "获取用户信息失败", Toast.LENGTH_SHORT).show();
+                    }
+                } else {
+                    SharedPreferences preferences = getSharedPreferences("UserPrefs", MODE_PRIVATE);
+                    SharedPreferences.Editor editor = preferences.edit();
+                    editor.clear();
+                    editor.apply();
+
+                    Intent intent = new Intent(context, LoginRegisterActivity.class);
+                    startActivity(intent);
+                    finish();
+                    Toast.makeText(context, "获取用户信息失败", Toast.LENGTH_SHORT).show();
+                }
+            }
+
+            @Override
+            public void onFailure(Call<ApiResponse> call, Throwable t) {
+                SharedPreferences preferences = getSharedPreferences("UserPrefs", MODE_PRIVATE);
+                SharedPreferences.Editor editor = preferences.edit();
+                editor.clear();
+                editor.apply();
+
+                Intent intent = new Intent(context, LoginRegisterActivity.class);
+                startActivity(intent);
+                finish();
+                Toast.makeText(context, "网络错误", Toast.LENGTH_SHORT).show();
+            }
+        });
     }
     private void showPermissionDialog() {
         new AlertDialog.Builder(this)
@@ -244,20 +479,33 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
                 .show();
 
     }
-
     private void startECGRecording() {
-
+        VivaLink.clearAllData();
         if (!isRecordingECG) {
-            isRecordingECG = true;
-            btnStartEcg.setText("停止心电");
-            tvEcgData.setText("心电数据: 正在记录...");
 
-            VivaLink.startSampling();
             try {
+                VivaLink.startSampling();
                 // 建议保存到应用私有存储中，避免权限问题
+                SharedPreferences prefs;
+                prefs = this.getSharedPreferences("AppSettings", MODE_PRIVATE);
+                String savedExperimentId = prefs.getString("experiment_id", "");
+                String directoryPath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES) + "/Sample/"+savedExperimentId+"/VivaLinkLog/";
+                File directory = new File(directoryPath);
+                if (!directory.exists()) {
+                    if (directory.mkdirs()) {
+                        Log.d("FileSave", "目录创建成功：" + directoryPath);
+                    } else {
+                        Log.e("FileSave", "目录创建失败：" + directoryPath);
+                        Toast.makeText(this, "无法创建目录，保存失败", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                }
                 String fileName = "VivaLink_log_" + System.currentTimeMillis() + ".txt";
-                File logFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)+"/Sample/VivaLinkLog/", fileName);
+                File logFile = new File(directory, fileName);
                 logWriterECG = new BufferedWriter(new FileWriter(logFile, true));
+                isRecordingECG = true;
+                btnStartEcg.setText("停止心电");
+                tvEcgData.setText("心电数据: 正在记录...");
                 Toast.makeText(MainActivity.this, "日志记录开始", Toast.LENGTH_SHORT).show();
             } catch (IOException e) {
                 e.printStackTrace();
@@ -287,15 +535,29 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
 
     // 模拟开始录制指环数据
     private void startRingRecording() {
+        NotificationHandler.clearAllData();
         if (!isRecordingRing) {
             isRecordingRing = true;
             btnStartRing.setText("停止指环");
             tvLMAPILog.setText("");
             startSendingCommands();
             try {
-                // 建议保存到应用私有存储中，避免权限问题
+                SharedPreferences prefs;
+                prefs = this.getSharedPreferences("AppSettings", MODE_PRIVATE);
+                String savedExperimentId = prefs.getString("experiment_id", "");
+                String directoryPath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES) + "/Sample/"+savedExperimentId+"/RingLog/";
+                File directory = new File(directoryPath);
+                if (!directory.exists()) {
+                    if (directory.mkdirs()) {
+                        Log.d("FileSave", "目录创建成功：" + directoryPath);
+                    } else {
+                        Log.e("FileSave", "目录创建失败：" + directoryPath);
+                        Toast.makeText(this, "无法创建目录，保存失败", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                }
                 String fileName = "LMAPI_log_" + System.currentTimeMillis() + ".txt";
-                File logFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)+"/Sample/RingLog/", fileName);
+                File logFile = new File(directory, fileName);
                 logWriter = new BufferedWriter(new FileWriter(logFile, true));
                 Toast.makeText(MainActivity.this, "日志记录开始", Toast.LENGTH_SHORT).show();
                 recordLog("【日志记录开始】");
@@ -310,25 +572,28 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
     // 模拟停止录制指环数据
     private void stopRingRecording() {
         if (isRecordingRing) {
-            isRecordingRing = false;
             btnStartRing.setText("指环开始");
             tvLMAPILog.setText("");
-            stopSendingCommands();
-            try {
-                if (logWriter != null) {
-                    logWriter.close();
-                    logWriter = null;
+            byte[] data = hexStringToByteArray("00003C04");
+
+            LmAPI.SEND_CMD(data);
+            new android.os.Handler().postDelayed(() -> {
+                try {
+                    isRecordingRing = false;
+                    if (logWriter != null) {
+                        logWriter.close();
+                        logWriter = null;
+                    }
+                    Toast.makeText(MainActivity.this, "日志记录结束", Toast.LENGTH_SHORT).show();
+                    recordLog("【日志记录结束】");
+                } catch (IOException e) {
+                    e.printStackTrace();
                 }
-                Toast.makeText(MainActivity.this, "日志记录结束", Toast.LENGTH_SHORT).show();
-                recordLog("【日志记录结束】");
-            } catch (IOException e) {
-                e.printStackTrace();
+            }, 1000); // 延迟 1 秒
             }
+
         }
 
-    }
-
-    // 模拟录制视频
     private void startVideoRecording() {
         isRecordingVideo = true;
         if (Settings.canDrawOverlays(this)) {
@@ -346,7 +611,6 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
         Intent intent = new Intent(this, FloatingWindowService.class);
         stopService(intent);
         btnRecordVideo.setText("录制视频");
-
     }
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
@@ -389,7 +653,13 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
         public void run() {
             SharedPreferences prefs = getSharedPreferences("AppSettings", MODE_PRIVATE);
             int savedTime = prefs.getInt("time_parameter", 0);
-            String hexData = "00003C00"+ Integer.toHexString(savedTime)+ "001010100100";
+            String hexData;
+            if(savedTime == 0){
+                hexData = "00003C00"+ "00"+ "001010100101";
+            }
+            else {
+                hexData = "00003C00" + Integer.toHexString(savedTime) + "001010100101";
+            }
             byte[] data = hexStringToByteArray(hexData);
             LmAPI.SEND_CMD(data);
         }
@@ -429,10 +699,23 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
             new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
                 @Override
                 public void run() {
-                    // 这里写要延迟执行的代码
                     LmAPI.SYNC_TIME();
                 }
+            }, 500); // 延迟 2 秒（2000 毫秒）
+            new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                @Override
+                public void run() {
+
+                    LmAPI.GET_BATTERY((byte) 0x00);
+                }
             }, 1000); // 延迟 2 秒（2000 毫秒）
+            new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                @Override
+                public void run() {
+
+                    LmAPI.GET_VERSION((byte) 0x00);
+                }
+            }, 1500); // 延迟 2 秒（2000 毫秒）
 
         }
     }
@@ -446,7 +729,7 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
 
     @Override
     public void VERSION(byte b, String s) {
-
+        recordLog(s);
     }
 
     @Override
@@ -466,7 +749,9 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
 
     @Override
     public void battery(byte b, byte b1) {
-
+        if (b == 0) {
+            recordLog("电池电量为" + b1);
+        }
     }
 
     @Override
@@ -618,28 +903,5 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
     @Override
     public void appRefresh(SystemControlBean systemControlBean) {
 
-    }
-    public void sendNotification(Context context) {
-        String channelId = "my_channel_id"; // 必须与创建的通知渠道 ID 匹配
-
-        // 点击通知时打开 MainActivity
-        Intent intent = new Intent(context, MainActivity.class);
-        PendingIntent pendingIntent = PendingIntent.getActivity(
-                context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-
-        // 创建通知
-        Notification notification = new NotificationCompat.Builder(context, channelId)
-                .setSmallIcon(R.drawable.ic_launcher_background) // 替换为你的图标
-                .setContentTitle("通知")
-                .setContentText("指环数据已收集完毕,请手动停止")
-                .setAutoCancel(true)
-                .setContentIntent(pendingIntent)
-                .build();
-
-        // 发送通知
-        NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (notificationManager != null) {
-            notificationManager.notify(1, notification); // 1 是通知 ID，可用于更新或取消通知
-        }
     }
 }

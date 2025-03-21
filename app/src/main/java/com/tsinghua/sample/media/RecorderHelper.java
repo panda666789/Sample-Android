@@ -23,6 +23,7 @@ import android.util.Log;
 import android.view.Surface;
 import android.widget.Button;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 
@@ -66,20 +67,34 @@ public class RecorderHelper {
     public void setupRecording() {
 
         startTimestamp = generateTimestamp();
-        outputDirectory = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES) + "/Sample", "Sample_" + startTimestamp);
+        SharedPreferences prefs;
+        prefs = context.getSharedPreferences("AppSettings", MODE_PRIVATE);
+        String savedExperimentId = prefs.getString("experiment_id", "");
+        String directoryPath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES) + "/Sample/"+savedExperimentId+"/";
+        File directory = new File(directoryPath);
+        if (!directory.exists()) {
+            if (directory.mkdirs()) {
+                Log.d("FileSave", "目录创建成功：" + directoryPath);
+            } else {
+                Log.e("FileSave", "目录创建失败：" + directoryPath);
+                Toast.makeText(context, "无法创建目录，保存失败", Toast.LENGTH_SHORT).show();
+                return;
+            }
+        }
+        outputDirectory = new File(directory, "Sample_" + startTimestamp);
 
         if (!outputDirectory.exists()) {
             outputDirectory.mkdirs();
         }
 
-//        File frontOutputFile = new File(outputDirectory, "front_camera_" + startTimestamp + ".mp4");
+//      File frontOutputFile = new File(outputDirectory, "front_camera_" + startTimestamp + ".mp4");
         File backOutputFile = new File(outputDirectory, "back_camera_" + startTimestamp + ".mp4");
 
-//        setupMediaRecorder(frontOutputFile.getAbsolutePath(), true, 270);
+//      setupMediaRecorder(frontOutputFile.getAbsolutePath(), true, 270);
         setupMediaRecorder(backOutputFile.getAbsolutePath(), false, 90);
 
         try {
-//            Surface frontPreviewSurface = cameraHelper.getSurfaceViewFront().getHolder().getSurface();
+//          Surface frontPreviewSurface = cameraHelper.getSurfaceViewFront().getHolder().getSurface();
             Surface backPreviewSurface = cameraHelper.getSurfaceViewBack().getHolder().getSurface();
 //            List<Surface> frontSurfaces = Arrays.asList(frontPreviewSurface, mediaRecorderFront.getSurface());
 //            cameraHelper.getCameraDeviceFront().createCaptureSession(frontSurfaces, new CameraCaptureSession.StateCallback() {
@@ -149,24 +164,10 @@ public class RecorderHelper {
                     Log.e(TAG, "Back camera capture session configuration failed.");
                 }
             }, null);
-//            mediaRecorderFront.start();
+//          mediaRecorderFront.start();
             mediaRecorderBack.start();
         } catch (CameraAccessException e) {
             e.printStackTrace();
-        }
-    }
-
-    private void saveYUVData(byte[] yData, byte[] uData, byte[] vData, long timestamp, String cameraType) {
-        String filename = cameraType + "_camera_frame_" + timestamp + ".yuv";
-        File file = new File(outputDirectory+"/"+cameraType+"/", filename);
-        try (FileOutputStream fos = new FileOutputStream(file)) {
-            fos.write(yData);
-            fos.write(uData);
-            fos.write(vData);
-            Log.d(TAG, "Saved " + cameraType + " camera frame to " + file.getAbsolutePath());
-        } catch (IOException e) {
-            e.printStackTrace();
-            Log.e(TAG, "Error saving image data: " + e.getMessage());
         }
     }
 
@@ -225,8 +226,8 @@ public class RecorderHelper {
                 cameraHelper.getCaptureSessionBack().stopRepeating();
                 mediaRecorderBack.stop();
 
-//                cameraHelper.getCaptureSessionFront().stopRepeating();
-//                mediaRecorderFront.stop();
+//               cameraHelper.getCaptureSessionFront().stopRepeating();
+//               mediaRecorderFront.stop();
 
                 mediaRecorderBack.reset();
 //                mediaRecorderFront.reset();
@@ -243,17 +244,31 @@ public class RecorderHelper {
         if (cameraHelper.isRecording()) return;
 
         stopTimestamp = generateTimestamp();
-        newOutputDirectory = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES) + "/Sample", "Sample_" + startTimestamp + "_" + stopTimestamp);
+        SharedPreferences prefs;
+        prefs = context.getSharedPreferences("AppSettings", MODE_PRIVATE);
+        String savedExperimentId = prefs.getString("experiment_id", "");
+        String directoryPath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES) + "/Sample/"+savedExperimentId+"/";
+        File directory = new File(directoryPath);
+        if (!directory.exists()) {
+            if (directory.mkdirs()) {
+                Log.d("FileSave", "目录创建成功：" + directoryPath);
+            } else {
+                Log.e("FileSave", "目录创建失败：" + directoryPath);
+                Toast.makeText(context, "无法创建目录，保存失败", Toast.LENGTH_SHORT).show();
+                return;
+            }
+        }
+        newOutputDirectory = new File(directory, "Sample_" + startTimestamp + "_" + stopTimestamp);
         if (outputDirectory.renameTo(newOutputDirectory)) {
             Log.d(TAG, "Folder renamed to: " + newOutputDirectory.getAbsolutePath());
         } else {
             Log.e(TAG, "Failed to rename folder.");
         }
 
-//        saveDataToFile(newOutputDirectory, "front_camera_data_" + startTimestamp + ".txt", frameDataFront);
+//      saveDataToFile(newOutputDirectory, "front_camera_data_" + startTimestamp + ".txt", frameDataFront);
         saveDataToFile(newOutputDirectory, "back_camera_data_" + startTimestamp + ".txt", frameDataBack);
 
-//        cameraHelper.startPreview(cameraHelper.getCameraDeviceFront(), cameraHelper.getSurfaceViewFront().getHolder().getSurface(), true);
+//      cameraHelper.startPreview(cameraHelper.getCameraDeviceFront(), cameraHelper.getSurfaceViewFront().getHolder().getSurface(), true);
         cameraHelper.startPreview(cameraHelper.getCameraDeviceBack(), cameraHelper.getSurfaceViewBack().getHolder().getSurface(), false);
 //        CameraManager cameraManager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
 //        String cameraId;

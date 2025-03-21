@@ -1,92 +1,160 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:background="#F8F8F8">
 
-    <!-- 主内容区域 -->
-    <LinearLayout
-        android:id="@+id/mainContent"
+    <!-- 可滚动内容 -->
+    <ScrollView
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:padding="16dp">
+        android:fillViewport="true"
+        android:paddingBottom="100dp">
 
-        <!-- 录制视频按钮 -->
-        <Button
-            android:id="@+id/btn_record_video"
-            android:layout_marginTop="20dp"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="录制视频" />
+            android:orientation="vertical"
+            android:padding="16dp">
 
-        <!-- 开始/停止心电记录按钮 -->
-        <Button
-            android:id="@+id/btn_start_ecg"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="心电开始" />
+            <!-- 录制视频 -->
+            <Button
+                android:id="@+id/btn_record_video"
+                style="@style/CustomButton"
+                android:text="录制视频" />
 
-        <!-- 开始/停止指环记录按钮 -->
-        <Button
-            android:id="@+id/btn_start_ring"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="指环开始" />
+            <!-- 心电记录 -->
+            <Button
+                android:id="@+id/btn_start_ecg"
+                style="@style/CustomButton"
+                android:text="心电记录" />
 
-        <!-- 水平 LinearLayout 用于左右并排显示数据 -->
+            <!-- 指环记录 -->
+            <Button
+                android:id="@+id/btn_start_ring"
+                style="@style/CustomButton"
+                android:text="指环记录" />
+            <!-- 数据展示区域 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="16dp">
+
+                <!-- 心电数据 -->
+                <androidx.cardview.widget.CardView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="8dp"
+                    app:cardCornerRadius="8dp"
+                    android:background="#FFFFFF">
+
+                    <ScrollView
+                        android:layout_width="match_parent"
+                        android:layout_height="300dp"
+                        android:padding="12dp">
+
+                        <TextView
+                            android:id="@+id/tv_ecg_data"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="心电数据"
+                            android:textSize="16sp"
+                            android:textColor="#333333"
+                            android:ellipsize="end" />
+                    </ScrollView>
+
+                </androidx.cardview.widget.CardView>
+
+                <!-- 指环数据 -->
+                <androidx.cardview.widget.CardView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    app:cardCornerRadius="8dp"
+                    android:background="#FFFFFF">
+
+                    <ScrollView
+                        android:layout_width="match_parent"
+                        android:layout_height="300dp"
+                        android:padding="12dp">
+
+                        <TextView
+                            android:id="@+id/tv_ring_data"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="指环数据"
+                            android:textSize="16sp"
+                            android:textColor="#333333"
+                            android:ellipsize="end" />
+                    </ScrollView>
+
+                </androidx.cardview.widget.CardView>
+            </LinearLayout>
+
+            <!-- 图表视图 -->
+            <com.github.AAChartModel.AAChartCore.AAChartCreator.AAChartView
+                android:id="@+id/chartViewForECG"
+                android:layout_width="match_parent"
+                android:layout_height="500dp"
+                android:layout_marginTop="16dp"/>
+
+            <com.github.AAChartModel.AAChartCore.AAChartCreator.AAChartView
+                android:id="@+id/chartViewForACC"
+                android:layout_width="match_parent"
+                android:layout_height="500dp"
+                android:layout_marginTop="16dp"/>
+
+            <com.github.AAChartModel.AAChartCore.AAChartCreator.AAChartView
+                android:id="@+id/chartViewForGIR"
+                android:layout_width="match_parent"
+                android:layout_height="500dp"
+                android:layout_marginTop="16dp"/>
+
+            <com.github.AAChartModel.AAChartCore.AAChartCreator.AAChartView
+                android:id="@+id/chartViewForIMU"
+                android:layout_width="match_parent"
+                android:layout_height="500dp"
+                android:layout_marginTop="16dp"/>
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- 底部悬浮操作按钮 -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:padding="16dp"
+        android:elevation="8dp"
+        android:background="?android:attr/windowBackground">
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginTop="16dp">
+            android:gravity="center">
 
-            <!-- 心电数据显示的 ScrollView -->
-            <ScrollView
-                android:layout_width="0dp"
-                android:layout_height="500dp"
-                android:layout_weight="1"
-                android:background="#E0E0E0"
-                android:padding="10dp">
-                <TextView
-                    android:id="@+id/tv_ecg_data"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="心电数据"
-                    android:textSize="16sp" />
-            </ScrollView>
+            <Button
+                android:id="@+id/btn_Timestamp"
+                style="@style/CustomSmallButton"
+                android:text="时间戳" />
 
-            <!-- 指环数据显示的 ScrollView -->
-            <ScrollView
-                android:layout_width="0dp"
-                android:layout_height="500dp"
-                android:layout_weight="1"
-                android:layout_marginStart="8dp"
-                android:background="#E0E0E0"
-                android:padding="10dp">
-                <TextView
-                    android:id="@+id/tv_ring_data"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="指环数据"
-                    android:textSize="16sp" />
-            </ScrollView>
+            <Button
+                android:id="@+id/btn_scanECG"
+                style="@style/CustomSmallButton"
+                android:text="心电扫描" />
+            <Button
+                android:id="@+id/btn_scanRing"
+                style="@style/CustomSmallButton"
+                android:text="指环扫描" />
+
+            <Button
+                android:id="@+id/btn_settings"
+                style="@style/CustomSmallButton"
+                android:text="设置" />
         </LinearLayout>
-    </LinearLayout>
+    </FrameLayout>
 
-    <!-- 右下角的 Settings 按钮 -->
-    <Button
-        android:id="@+id/btn_settings"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="设置"
-        android:layout_gravity="bottom|end"
-        android:layout_margin="16dp" />
-    <Button
-        android:id="@+id/btn_Timestamp"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="时间戳"
-        android:layout_gravity="bottom|start"
-        android:layout_margin="16dp" />
 </FrameLayout>

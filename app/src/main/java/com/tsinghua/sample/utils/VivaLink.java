@@ -4,8 +4,12 @@ import static com.tsinghua.sample.MainActivity.isRecordingECG;
 import static com.tsinghua.sample.MainActivity.logWriterECG;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.Context;
 import android.content.pm.PackageManager;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -13,8 +17,11 @@ import android.widget.Toast;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import com.github.AAChartModel.AAChartCore.AAChartCreator.AAChartView;
+import com.github.AAChartModel.AAChartCore.AAChartCreator.AASeriesElement;
 import com.tsinghua.sample.MainActivity;
 import com.tsinghua.sample.R;
+import com.tsinghua.sample.network.WebSocketManager;
 import com.vivalnk.sdk.Callback;
 import com.vivalnk.sdk.CommandRequest;
 import com.vivalnk.sdk.DataReceiveListener;
@@ -27,12 +34,15 @@ import com.vivalnk.sdk.common.ble.connect.BleConnectOptions;
 import com.vivalnk.sdk.common.ble.scan.ScanOptions;
 import com.vivalnk.sdk.device.vv330.VV330Manager;
 import com.vivalnk.sdk.model.Device;
+import com.vivalnk.sdk.model.Motion;
 import com.vivalnk.sdk.model.SampleData;
 import com.vivalnk.sdk.utils.GSON;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 
@@ -50,6 +60,32 @@ public class VivaLink {
 
     // 权限请求码
     private static final int PERMISSION_REQUEST_CODE = 100;
+
+    private static AAChartView aaChartViewECG;    // ECG 图表
+    private static AAChartView aaChartViewAcc;    // Acc 图表
+
+    // **全局数据存储**
+    private static final Deque<Integer> ecgData = new ArrayDeque<>();
+    private static final Deque<Integer> accXData = new ArrayDeque<>();
+    private static final Deque<Integer> accYData = new ArrayDeque<>();
+    private static final Deque<Integer> accZData = new ArrayDeque<>();
+    private static int HR=0;
+    private static int RR=0;
+    private static final int MAX_DATA_POINTS = 2000;
+    public static void setAAChartViewECG(AAChartView chartView) {
+        aaChartViewECG = chartView;
+    }
+
+    public static void setAAChartViewAcc(AAChartView chartView) {
+        aaChartViewAcc = chartView;
+    }
+    public static void clearAllData() {
+        ecgData.clear();
+        accXData.clear();
+        accYData.clear();
+        accZData.clear();
+        refreshCharts();
+    }
 
     // 检查并请求权限
     public static void checkAndRequestPermissions(Activity activity) {
@@ -117,7 +153,7 @@ public class VivaLink {
                 if (device != null) {
                     connectToDevice(activity, device);
                 } else {
-                    Toast.makeText(activity, "未找到符合条件的设备", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(activity, "未找到符合条件的心电设备", Toast.LENGTH_SHORT).show();
                 }
             }
         });
@@ -151,6 +187,29 @@ public class VivaLink {
                     @Override
                     public void onReceiveSampleData(Device device, boolean flash, SampleData data) {
                         SampleDataReceiveListener.super.onReceiveSampleData(device, flash, data);
+                        HR = (Integer) data.extras.get("hr");
+                        RR = (Integer) data.extras.get("rr");
+                        int[] ecg = (int[]) data.extras.get("ecg");
+                        Motion[] acc = (Motion[]) data.extras.get("acc");
+                        List<Integer> newECGData = new ArrayList<>();
+                        List<Integer> newAccXData = new ArrayList<>();
+                        List<Integer> newAccYData = new ArrayList<>();
+                        List<Integer> newAccZData = new ArrayList<>();
+                        if (ecg != null) {
+                            for (int value : ecg) {
+                                newECGData.add(value);
+                            }
+                        }
+                        if (acc != null) {
+                            for (Motion motion : acc) {
+                                newAccXData.add(motion.getX());
+                                newAccYData.add(motion.getY());
+                                newAccZData.add(motion.getZ());
+                            }
+                        }
+
+                        updateECGChartData(newECGData);
+                        updateAccChartData(newAccXData, newAccYData, newAccZData);
                         String logStr = "接收到数据: " + GSON.toJson(data);
                         Log.e(TAG, logStr);
                         updateTextView(activity, logStr);
@@ -226,13 +285,18 @@ public class VivaLink {
     }
     private static void updateTextView(final Activity activity, final String newText) {
         activity.runOnUiThread(new Runnable() {
+            @SuppressLint("SetTextI18n")
             @Override
             public void run() {
                 TextView tv = activity.findViewById(R.id.tv_ecg_data);
                 if (tv != null) {
-                    // 这里以追加的方式显示数据
-                    String currentText = tv.getText().toString();
-                    tv.setText(currentText + "\n" + newText);
+                    if(isRecordingECG){
+                        WebSocketManager.getInstance(activity).sendMessage(String.valueOf(MainActivity.user.getId()),"HR:"+HR + " RR:"+RR);
+                        tv.setText("HR:" + HR + " RR:" +RR);
+                    }
+                    else {
+                        tv.setText(newText);
+                    }
                 }
             }
 
@@ -274,6 +338,45 @@ public class VivaLink {
         });
     }
 
+    public static void updateECGChartData(List<Integer> newECGData) {
+        appendData(ecgData, newECGData);
+        refreshCharts();
+    }
+
+    public static void updateAccChartData(List<Integer> newXData, List<Integer> newYData, List<Integer> newZData) {
+        appendData(accXData, newXData);
+        appendData(accYData, newYData);
+        appendData(accZData, newZData);
+        refreshCharts();
+    }
+
+    private static void appendData(Deque<Integer> oldData, List<Integer> newData) {
+        if (oldData.size() + newData.size() > MAX_DATA_POINTS) {
+            oldData.clear(); // 先清空
+        }
+        oldData.addAll(newData); // 再添加新数据
+    }
+
+    private static void refreshCharts() {
+        new Handler(Looper.getMainLooper()).post(() -> {
+
+                    if (aaChartViewECG != null) {
+            aaChartViewECG.aa_onlyRefreshTheChartDataWithChartOptionsSeriesArray(
+                    new AASeriesElement[]{
+                            new AASeriesElement().name("ECG").data(ecgData.toArray(new Object[ecgData.size()]))
+                    });
+        }
+
+        if (aaChartViewAcc != null) {
+            aaChartViewAcc.aa_onlyRefreshTheChartDataWithChartOptionsSeriesArray(
+                    new AASeriesElement[]{
+                            new AASeriesElement().name("AccX").data(accXData.toArray(new Object[accXData.size()])),
+                            new AASeriesElement().name("AccY").data(accYData.toArray(new Object[accYData.size()])),
+                            new AASeriesElement().name("AccZ").data(accZData.toArray(new Object[accZData.size()]))
+                    });
+        }
+        });
+    }
     // 结束采样方法
     public static void stopSampling() {
         CommandRequest request = new CommandRequest.Builder()

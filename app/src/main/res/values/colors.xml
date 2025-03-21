@@ -2,4 +2,13 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="teal_700">#018786</color>
+    <color name="default_background">#FFFFFF</color> <!-- 白色，未选中项的背景色 -->
+
+    <color name="selected_background">#E0F7FA</color> <!-- 浅蓝色，选中项的背景色 -->
+        <color name="my_primary">#009688</color>
+        <color name="my_primary_container">#B2DFDB</color>
+        <color name="my_on_primary">#FFFFFF</color>
+        <color name="my_secondary">#FF5722</color>
+
 </resources>

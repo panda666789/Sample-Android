@@ -1,73 +1,63 @@
 package com.tsinghua.sample;
 
+import static android.content.Context.MODE_PRIVATE;
+
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Environment;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ArrayAdapter;
-import android.widget.Button;
-import android.widget.EditText;
-import android.widget.ListView;
-import android.widget.TextView;
-import android.widget.Toast;
-
+import android.widget.*;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.fragment.app.Fragment;
+import androidx.lifecycle.ViewModelProvider;
 
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment;
+import com.tsinghua.sample.utils.SharedViewModel;
 
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.HashSet;
-import java.util.Locale;
 import java.util.Set;
 
 public class TimestampFragment extends BottomSheetDialogFragment {
-
+    private SharedViewModel viewModel;
     private EditText etNewLabel;
-    private Button btnAddLabel;
+    private Button btnAddLabel, btnSaveRecords;
     private ListView lvLabels;
     private TextView tvPreview;
-    private Button btnSaveRecords;
-
-    // 存储所有记录的事件（每条记录格式：“标签: 时间戳”）
-    private ArrayList<String> recordedEvents = new ArrayList<>();
-
-    // 标签列表（仅存标签，不包含记录），并持久化到 SharedPreferences
     private ArrayList<String> tagList = new ArrayList<>();
-
+    private ArrayList<String> recordedEvents = new ArrayList<>();
     private TagAdapter adapter;
+    private static final String PREFS_EVENTS = "EventsPrefs";
+    private static final String KEY_EVENTS = "saved_events";
 
-    // SharedPreferences keys
-    private static final String PREFS_NAME = "LabelPrefs";
-    private static final String KEY_TAGS = "saved_tags";
-
-    @Nullable
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container,
                              @Nullable Bundle savedInstanceState) {
+        viewModel = new ViewModelProvider(requireActivity()).get(SharedViewModel.class);
+
         View view = inflater.inflate(R.layout.fragment_timestamp, container, false);
+
         etNewLabel = view.findViewById(R.id.et_new_label);
         btnAddLabel = view.findViewById(R.id.btn_add_label);
         lvLabels = view.findViewById(R.id.lv_labels);
         tvPreview = view.findViewById(R.id.tv_preview);
         btnSaveRecords = view.findViewById(R.id.btn_save_records);
 
-        // 从 SharedPreferences 加载已有标签
-        loadTags();
+        loadTags(); // 加载标签
+        loadRecordedEvents(); // 加载时间戳记录
 
         adapter = new TagAdapter(getContext(), tagList);
         lvLabels.setAdapter(adapter);
 
-        // 添加新标签（仅添加到标签列表，不显示在预览区）
         btnAddLabel.setOnClickListener(v -> {
             String newTag = etNewLabel.getText().toString().trim();
             if (TextUtils.isEmpty(newTag)) {
@@ -84,57 +74,30 @@ public class TimestampFragment extends BottomSheetDialogFragment {
             }
         });
 
-        // 保存记录按钮：将预览区的内容保存到外部公共目录中
-        btnSaveRecords.setOnClickListener(v -> saveRecordsToFile());
+        btnSaveRecords.setOnClickListener(v -> saveRecordsToFile()); // 保存记录到文件
 
-        updatePreview();
-
+        updatePreview(); // 初始化预览区域
         return view;
     }
 
-    // 从 SharedPreferences 加载标签列表
-    private void loadTags() {
-        SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        Set<String> savedTags = prefs.getStringSet(KEY_TAGS, null);
-        if (savedTags != null) {
-            tagList.clear();
-            tagList.addAll(savedTags);
+    private void loadRecordedEvents() {
+        SharedPreferences prefs = getContext().getSharedPreferences(PREFS_EVENTS, MODE_PRIVATE);
+        Set<String> savedEvents = prefs.getStringSet(KEY_EVENTS, null);
+        if (savedEvents != null) {
+            recordedEvents.clear();
+            recordedEvents.addAll(savedEvents);
         }
+        updatePreview();
     }
 
-    // 保存标签列表到 SharedPreferences
-    private void saveTags() {
-        SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+    private void saveRecordedEvents() {
+        SharedPreferences prefs = getContext().getSharedPreferences(PREFS_EVENTS, MODE_PRIVATE);
         SharedPreferences.Editor editor = prefs.edit();
-        Set<String> set = new HashSet<>(tagList);
-        editor.putStringSet(KEY_TAGS, set);
+        Set<String> set = new HashSet<>(recordedEvents);
+        editor.putStringSet(KEY_EVENTS, set);
         editor.apply();
     }
 
-    // 更新预览区域，显示所有记录的事件
-    private void updatePreview() {
-        StringBuilder builder = new StringBuilder();
-        for (String event : recordedEvents) {
-            builder.append(event).append("\n");
-        }
-        tvPreview.setText(builder.toString());
-    }
-
-    // 保存记录到外部公共目录（如 Documents）
-    private void saveRecordsToFile() {
-        String fileName = "recorded_events_" + System.currentTimeMillis() + ".txt";
-        File file = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)+"/Sample/TimeStamps/", fileName);
-        try (FileWriter writer = new FileWriter(file)) {
-            writer.write(tvPreview.getText().toString());
-            writer.flush();
-            Toast.makeText(getContext(), "保存成功：" + file.getAbsolutePath(), Toast.LENGTH_LONG).show();
-        } catch (IOException e) {
-            e.printStackTrace();
-            Toast.makeText(getContext(), "保存失败", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    // 自定义 Adapter，用于展示标签列表，每个项包含“记录”和“删除”按钮
     private class TagAdapter extends ArrayAdapter<String> {
         public TagAdapter(@NonNull Context context, ArrayList<String> tags) {
             super(context, 0, tags);
@@ -153,15 +116,16 @@ public class TimestampFragment extends BottomSheetDialogFragment {
 
             tvLabelName.setText(tag);
 
-            // 点击“记录”按钮时，记录【标签 + 当前时间戳】到记录列表中
+            // 记录时间戳，并持久化到 SharedPreferences
             btnRecordTimestamp.setOnClickListener(v -> {
                 long currentTime = System.currentTimeMillis();
                 String event = tag + ": " + currentTime;
                 recordedEvents.add(event);
+                saveRecordedEvents(); // 立即保存到 SharedPreferences
                 updatePreview();
             });
 
-            // 点击“删除”按钮时，删除该标签并更新持久化数据
+            // 删除标签
             btnDeleteLabel.setOnClickListener(v -> {
                 tagList.remove(tag);
                 notifyDataSetChanged();
@@ -170,5 +134,63 @@ public class TimestampFragment extends BottomSheetDialogFragment {
 
             return convertView;
         }
+    }
+
+    private void updatePreview() {
+        tvPreview.setText(TextUtils.join("\n", recordedEvents));
+    }
+
+    private void saveTags() {
+        SharedPreferences prefs = getContext().getSharedPreferences("TagsPrefs", MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        Set<String> set = new HashSet<>(tagList);
+        editor.putStringSet("saved_tags", set);
+        editor.apply();
+    }
+
+    private void loadTags() {
+        SharedPreferences prefs = getContext().getSharedPreferences("TagsPrefs", MODE_PRIVATE);
+        Set<String> savedTags = prefs.getStringSet("saved_tags", null);
+        if (savedTags != null) {
+            tagList.clear();
+            tagList.addAll(savedTags);
+        }
+    }
+
+    private void saveRecordsToFile() {
+        recordedEvents.clear();
+        SharedPreferences prefs = getContext().getSharedPreferences(PREFS_EVENTS, MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.clear();
+        editor.apply();
+        SharedPreferences prefsSettings;
+        prefsSettings = getContext().getSharedPreferences("AppSettings", MODE_PRIVATE);
+
+        String savedExperimentId = prefsSettings.getString("experiment_id", "");
+        String directoryPath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES) + "/Sample/"+savedExperimentId+"/TimeStamps/";
+        File directory = new File(directoryPath);
+        if (!directory.exists()) {
+            if (directory.mkdirs()) {
+                Log.d("FileSave", "目录创建成功：" + directoryPath);
+            } else {
+                Log.e("FileSave", "目录创建失败：" + directoryPath);
+                Toast.makeText(getContext(), "无法创建目录，保存失败", Toast.LENGTH_SHORT).show();
+                return;
+            }
+        }
+
+        String fileName = "recorded_events_" + System.currentTimeMillis() + ".txt";
+        File file = new File(directory, fileName);
+        try (FileWriter writer = new FileWriter(file)) {
+            writer.write(tvPreview.getText().toString());
+            writer.flush();
+            Toast.makeText(getContext(), "保存成功：" + file.getAbsolutePath(), Toast.LENGTH_LONG).show();
+        } catch (IOException e) {
+            e.printStackTrace();
+            Toast.makeText(getContext(), "保存失败", Toast.LENGTH_SHORT).show();
+        }
+        updatePreview();
+
+
     }
 }
