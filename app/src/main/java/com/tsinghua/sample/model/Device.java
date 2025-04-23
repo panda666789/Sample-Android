@@ -12,6 +12,16 @@ public class Device {
     private int type;
     private String name;
     private Boolean isRunning;
+    // 在 Device.java 中添加：
+    private boolean infoExpanded = false;
+
+    public boolean isInfoExpanded() {
+        return infoExpanded;
+    }
+
+    public void setInfoExpanded(boolean infoExpanded) {
+        this.infoExpanded = infoExpanded;
+    }
 
     public Device(int type, String name) {
         this.type = type;

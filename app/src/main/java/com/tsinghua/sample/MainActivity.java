@@ -63,7 +63,6 @@ import com.tsinghua.sample.model.UserInfoRequest;
 import com.tsinghua.sample.network.ApiService;
 import com.tsinghua.sample.network.AuthInterceptor;
 import com.tsinghua.sample.network.WebSocketManager;
-import com.tsinghua.sample.service.FloatingWindowService;
 import com.tsinghua.sample.utils.NotificationHandler;
 import com.tsinghua.sample.utils.VivaLink;
 import com.vivalnk.sdk.BuildConfig;
@@ -246,7 +245,6 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
         LmAPI.init(this.getApplication());
         LmAPI.setDebug(true);
         LmAPI.addWLSCmdListener(this, this);
-//// 监视蓝牙设备与APP连接的状态
         IntentFilter intentFilter = new IntentFilter();
         intentFilter.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
         intentFilter.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED);
@@ -598,7 +596,7 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
         isRecordingVideo = true;
         if (Settings.canDrawOverlays(this)) {
             // 已授权，启动服务
-            startService(new Intent(this, FloatingWindowService.class));
+            //startService(new Intent(this, FloatingWindowService.class));
             btnRecordVideo.setText("点击悬浮窗开始录制");
         } else {
             // 请求悬浮窗权限
@@ -608,8 +606,8 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
     }
     private void stopVideoRecording() {
         isRecordingVideo = false;
-        Intent intent = new Intent(this, FloatingWindowService.class);
-        stopService(intent);
+        //Intent intent = new Intent(this, FloatingWindowService.class);
+        //stopService(intent);
         btnRecordVideo.setText("录制视频");
     }
     @Override

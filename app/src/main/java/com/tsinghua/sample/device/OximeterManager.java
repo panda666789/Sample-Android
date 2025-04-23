@@ -44,6 +44,7 @@ public class OximeterManager {
 
     public void setDataListener(OximeterDataListener l) {
         this.listener = l;
+
     }
 
     public void connectAndStart() {
@@ -75,10 +76,7 @@ public class OximeterManager {
             byte[] initCmd2 = new byte[]{0x00, (byte)0x8e, 0x03, 0x11};
             byte[] init1= new byte[]{(byte) 0x81, 0x01, 0x00, 0x00};
             byte[] init2 = new byte[]{0x00, (byte) 0x81, 0x01, 0x00};
-//            connection.controlTransfer(requestType, request, value, index, init2, init2.length, 300);
-//            connection.controlTransfer(requestType, request, value, index, initCmd2, initCmd2.length, 300);
 
-//            connection.controlTransfer(requestType, request, value, index, initCmd1, initCmd1.length, 300);
             int requestTypeSetReport = UsbConstants.USB_DIR_OUT | UsbConstants.USB_TYPE_CLASS | USB_RECIP_INTERFACE;
             int requestTypeGetReport = UsbConstants.USB_DIR_IN | UsbConstants.USB_TYPE_CLASS | USB_RECIP_INTERFACE;
 

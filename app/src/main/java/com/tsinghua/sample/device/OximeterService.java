@@ -29,6 +29,7 @@ public class OximeterService extends Service {
 
     public void setListener(OximeterDataListener listener) {
         manager.setDataListener(listener);
+
     }
 
     public void startRecording(String path) {

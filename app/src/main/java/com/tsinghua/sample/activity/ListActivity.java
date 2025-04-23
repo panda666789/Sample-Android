@@ -1,17 +1,23 @@
 package com.tsinghua.sample.activity;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
+import android.provider.Settings;
 import android.util.Log;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -27,6 +33,8 @@ public class ListActivity extends AppCompatActivity {
 
     private static final String ACTION_USB_PERMISSION = "com.tsinghua.sample.USB_PERMISSION";
     private UsbManager usbManager;
+    private static final int PERMISSION_REQUEST_CODE = 100;  // Permission request code
+    private static final int REQUEST_CAMERA_PERMISSION = 200;
 
     private RecyclerView recyclerView;
     private DeviceAdapter adapter;
@@ -36,11 +44,12 @@ public class ListActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_list);
+        checkPermissions();
 
         usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
         registerReceiver(usbReceiver, new IntentFilter(ACTION_USB_PERMISSION), Context.RECEIVER_NOT_EXPORTED);
 
-        checkOximeterUsbPermission(); // 👈 初始化时检查并请求权限
+        checkOximeterUsbPermission();
 
         recyclerView = findViewById(R.id.deviceRecyclerView);
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
@@ -88,7 +97,26 @@ public class ListActivity extends AppCompatActivity {
             }
         }
     };
+    private void checkPermissions(){
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                Intent intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                startActivity(intent);
+            }
+        }
+
+        if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED ||
+                ActivityCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ||
+                ActivityCompat.checkSelfPermission(this, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED ||
+                ActivityCompat.checkSelfPermission(this, android.Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, new String[]{
+                    android.Manifest.permission.CAMERA,
+                    android.Manifest.permission.RECORD_AUDIO,
+                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                    Manifest.permission.READ_EXTERNAL_STORAGE}, REQUEST_CAMERA_PERMISSION);
+        }
+    }
     @Override
     protected void onDestroy() {
         unregisterReceiver(usbReceiver);
