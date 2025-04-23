@@ -49,7 +49,7 @@ public class DeviceAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder>
     public DeviceAdapter(Context context, List<Device> devices) {
         this.context = context;
         this.devices = devices;
-
+        this.imuRecorder = new IMURecorder(context);
     }
     private final ServiceConnection oximeterConnection = new ServiceConnection() {
         @Override
@@ -179,21 +179,24 @@ public class DeviceAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder>
             });
         } else if (holder instanceof ImuViewHolder) {
             ImuViewHolder h = (ImuViewHolder) holder;
-            imuRecorder = new IMURecorder(context);
             h.deviceName.setText(device.getName());
+
+            // 展开IMU数据的预览
+            h.itemView.setOnClickListener(v -> {
+                h.toggleInfo();  // 点击展开或收起 IMU 数据的预览
+            });
+
             h.startBtn.setOnClickListener(v -> {
                 if (device.isRunning()) {
-                    // 停止录制
+                    // 停止 IMU 录制
                     imuRecorder.stopRecording();
                     device.setRunning(false);
                     h.startBtn.setText("开始");
-
                 } else {
-                    // 启动录制
+                    // 启动 IMU 录制
                     imuRecorder.startRecording();
                     device.setRunning(true);
                     h.startBtn.setText("结束");
-
                 }
             });
 
@@ -201,6 +204,11 @@ public class DeviceAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder>
                 Intent intent = new Intent(context, ImuSettingsActivity.class);
                 intent.putExtra("deviceName", device.getName());
                 context.startActivity(intent);
+            });
+
+            // 获取 IMU 数据并实时更新
+            imuRecorder.setOnDataUpdateListener((accelData, gyroData) -> {
+                h.updateIMUData(accelData, gyroData);
             });
         } else if (holder instanceof RingViewHolder) {
             RingViewHolder h = (RingViewHolder) holder;

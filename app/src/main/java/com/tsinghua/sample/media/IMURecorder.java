@@ -28,6 +28,10 @@ public class IMURecorder implements SensorEventListener {
     private Context context;
     private List<String> gyroscopeData;
     private final String TAG = "IMURecorder";
+    private OnDataUpdateListener dataUpdateListener;  // 用于实时更新数据的监听器
+    private static final int UPDATE_INTERVAL = 100;
+    private int accelerometerDataCount = 0;
+    private int gyroscopeDataCount = 0;
     public IMURecorder(Context context) {
         sensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
@@ -117,7 +121,9 @@ public class IMURecorder implements SensorEventListener {
     }
 
 
-    @Override
+    public void setOnDataUpdateListener(OnDataUpdateListener listener) {
+        this.dataUpdateListener = listener;
+    }
     public void onSensorChanged(SensorEvent event) {
         if (isRecording) {
             long timestamp = event.timestamp;
@@ -127,8 +133,44 @@ public class IMURecorder implements SensorEventListener {
 
             if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
                 accelerometerData.add(String.format(Locale.getDefault(), "%d,%f,%f,%f", timestamp, x, y, z));
+                accelerometerDataCount++;
+                if (accelerometerDataCount >= UPDATE_INTERVAL) {
+                    notifyDataUpdate();
+                    accelerometerDataCount = 0; // Reset the counter after update
+                }
             } else if (event.sensor.getType() == Sensor.TYPE_GYROSCOPE) {
                 gyroscopeData.add(String.format(Locale.getDefault(), "%d,%f,%f,%f", timestamp, x, y, z));
+                gyroscopeDataCount++;
+                if (gyroscopeDataCount >= UPDATE_INTERVAL) {
+                    notifyDataUpdate();
+                    gyroscopeDataCount = 0; // Reset the counter after update
+                }
+            }
+        }
+    }
+    private void notifyDataUpdate() {
+        if (dataUpdateListener != null) {
+            if (!accelerometerData.isEmpty() && !gyroscopeData.isEmpty()) {
+                // 解析最后一条加速度数据并转换为 float
+                String[] accelValues = accelerometerData.get(accelerometerData.size() - 1).split(",");
+                float accelX = Float.parseFloat(accelValues[1]);
+                float accelY = Float.parseFloat(accelValues[2]);
+                float accelZ = Float.parseFloat(accelValues[3]);
+
+                // 解析最后一条陀螺仪数据并转换为 float
+                String[] gyroValues = gyroscopeData.get(gyroscopeData.size() - 1).split(",");
+                float gyroX = Float.parseFloat(gyroValues[1]);
+                float gyroY = Float.parseFloat(gyroValues[2]);
+                float gyroZ = Float.parseFloat(gyroValues[3]);
+
+                // 格式化数据
+                String accel = String.format("x: %f, y: %f, z: %f", accelX, accelY, accelZ);
+                String gyro = String.format("x: %f, y: %f, z: %f", gyroX, gyroY, gyroZ);
+
+                // 通知数据更新
+                dataUpdateListener.onDataUpdate(accel, gyro);
+            } else {
+                Log.e(TAG, "IMU data is empty. Cannot notify data update.");
             }
         }
     }
@@ -139,5 +181,8 @@ public class IMURecorder implements SensorEventListener {
     }
     private String generateTimestamp() {
         return String.valueOf(System.nanoTime());
+    }
+    public interface OnDataUpdateListener {
+        void onDataUpdate(String accelData, String gyroData);
     }
 }
