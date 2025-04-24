@@ -53,24 +53,33 @@
         <TextView
             android:id="@+id/tvLog"
             android:layout_width="match_parent"
-            android:layout_height="200dp"
+            android:layout_height="50dp"
             android:text="日志"
             android:textSize="12sp"
             android:textColor="#000" />
-
-
-        <com.github.AAChartModel.AAChartCore.AAChartCreator.AAChartView
-            android:id="@+id/chartViewForGIR"
+        <com.tsinghua.sample.PlotView
+            android:id="@+id/plotViewG"
             android:layout_width="match_parent"
-            android:layout_height="500dp"
-            android:layout_marginTop="16dp"/>
-
-        <com.github.AAChartModel.AAChartCore.AAChartCreator.AAChartView
-            android:id="@+id/chartViewForIMU"
+            android:layout_height="80dp" />
+        <com.tsinghua.sample.PlotView
+            android:id="@+id/plotViewI"
             android:layout_width="match_parent"
-            android:layout_height="500dp"
-            android:layout_marginTop="16dp"/>
+            android:layout_height="80dp" />
+        <com.tsinghua.sample.PlotView
+            android:id="@+id/plotViewR"
+            android:layout_width="match_parent"
+            android:layout_height="80dp" />
+        <com.tsinghua.sample.PlotView
+            android:id="@+id/plotViewX"
+            android:layout_width="match_parent"
+            android:layout_height="80dp" />
+        <com.tsinghua.sample.PlotView
+            android:id="@+id/plotViewY"
+            android:layout_width="match_parent"
+            android:layout_height="80dp" />
+        <com.tsinghua.sample.PlotView
+            android:id="@+id/plotViewZ"
+            android:layout_width="match_parent"
+            android:layout_height="80dp" />
     </LinearLayout>
-
-
 </LinearLayout>

@@ -313,17 +313,17 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
         AASeriesElement greenSeries = new AASeriesElement()
                 .name("green")
                 .color("#00FF00")
-                .data(new Object[]{0});
+                .data(new Object[]{});
 
         AASeriesElement irSeries = new AASeriesElement()
                 .name("ir")
                 .color("#0000FF")
-                .data(new Object[]{0});
+                .data(new Object[]{});
 
         AASeriesElement redSeries = new AASeriesElement()
                 .name("red")
                 .color("#FF0000")
-                .data(new Object[]{0});
+                .data(new Object[]{});
         AASeriesElement xSeries = new AASeriesElement()
                 .name("x")
                 .data(new Object[]{0});
@@ -396,8 +396,6 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
                 .series(new AASeriesElement[]{xSeries, ySeries, zSeries})
                 .dataLabelsEnabled(false);
         chartViewIMU.aa_drawChartWithChartModel(aaChartModelIMU);
-        NotificationHandler.setAAChartView(chartViewGIR);
-        NotificationHandler.setAAChartViewXYZ(chartViewIMU);
     }
     private void UserInfo(final String usernameOrPhone) {
         UserInfoRequest userInfoRequest = new UserInfoRequest();

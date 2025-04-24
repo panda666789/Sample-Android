@@ -225,7 +225,6 @@ public class DeviceAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder>
             });
         } else if (holder instanceof RingViewHolder) {
             RingViewHolder h = (RingViewHolder) holder;
-            h.setUpChart(context);
 
             h.deviceName.setText(device.getName());
             h.itemView.setOnClickListener(v -> {

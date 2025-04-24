@@ -8,6 +8,7 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Color;
 import android.os.Environment;
 import android.util.Log;
 import android.view.View;
@@ -46,7 +47,10 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
     Button connectBtn;  // 用于连接蓝牙按钮
     private BufferedWriter logWriter; // 日志写入器
     private boolean isRecordingRing = false;
-    private AAChartView chartViewGIR,chartViewIMU;
+    private AAChartView chartViewGreen, chartViewIr, chartViewRed, chartViewIMU;  // 为每个数据系列分别设置图表
+    private PlotView plotViewG,plotViewI;
+    private PlotView plotViewR,plotViewX;
+    private PlotView plotViewY,plotViewZ;
 
     public RingViewHolder(View itemView) {
         super(itemView);
@@ -58,6 +62,27 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
         tvLog = itemView.findViewById(R.id.tvLog); // 显示日志
         connectBtn = itemView.findViewById(R.id.connectBtn); // 蓝牙连接按钮
         connectBtn.setOnClickListener(v -> connectToDevice(itemView.getContext()));
+        plotViewG = itemView.findViewById(R.id.plotViewG);
+        plotViewI = itemView.findViewById(R.id.plotViewI);
+        plotViewR = itemView.findViewById(R.id.plotViewR);
+        plotViewX = itemView.findViewById(R.id.plotViewX);
+        plotViewY = itemView.findViewById(R.id.plotViewY);
+        plotViewZ = itemView.findViewById(R.id.plotViewZ);
+        plotViewG.setPlotColor(Color.parseColor("#00FF00")); // 设置 green 颜色
+        plotViewI.setPlotColor(Color.parseColor("#0000FF")); // 设置 ir 颜色
+        plotViewR.setPlotColor(Color.parseColor("#FF0000")); // 设置 red 颜色
+        plotViewX.setPlotColor(Color.parseColor("#FFFF00")); // 设置 x 轴的颜色
+        plotViewY.setPlotColor(Color.parseColor("#FF00FF")); // 设置 y 轴的颜色
+        plotViewZ.setPlotColor(Color.parseColor("#00FFFF")); // 设置 z 轴的颜色
+        NotificationHandler.setPlotViewG(plotViewG);
+        NotificationHandler.setPlotViewI(plotViewI);
+        NotificationHandler.setPlotViewR(plotViewR);
+        NotificationHandler.setPlotViewX(plotViewX);
+        NotificationHandler.setPlotViewY(plotViewY);
+        NotificationHandler.setPlotViewZ(plotViewZ);
+
+
+
 
     }
 
@@ -183,68 +208,5 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
                 }
             }, 1000); // 延迟 1 秒
         }
-    }
-    void setUpChart(Context context){
-        chartViewGIR = itemView.findViewById(R.id.chartViewForGIR);
-        chartViewIMU = itemView.findViewById(R.id.chartViewForIMU);
-
-        AASeriesElement greenSeries = new AASeriesElement()
-                .name("green")
-                .color("#00FF00")
-                .data(new Object[]{0});
-
-        AASeriesElement irSeries = new AASeriesElement()
-                .name("ir")
-                .color("#0000FF")
-                .data(new Object[]{0});
-
-        AASeriesElement redSeries = new AASeriesElement()
-                .name("red")
-                .color("#FF0000")
-                .data(new Object[]{0});
-        AASeriesElement xSeries = new AASeriesElement()
-                .name("x")
-                .data(new Object[]{0});
-
-        AASeriesElement ySeries = new AASeriesElement()
-                .name("y")
-                .data(new Object[]{0});
-
-        AASeriesElement zSeries = new AASeriesElement()
-                .name("z")
-                .data(new Object[]{0});
-
-        SharedPreferences prefs = context.getSharedPreferences("AppSettings", MODE_PRIVATE);
-        int savedYAxisMin = prefs.getInt("y_axis_min", 0);
-        AAChartModel aaChartModelGIR = new AAChartModel()
-                .chartType(AAChartType.Spline) // 选择折线图
-                .markerRadius(0)
-                .animationType(AAChartAnimationType.EaseTo)
-                .xAxisLabelsEnabled(false)
-
-                .scrollablePlotArea(new AAScrollablePlotArea()
-                        .minWidth(800)
-                        .minHeight(400)
-                        .opacity(1f)
-                        .scrollPositionX(1)
-                        .scrollPositionY(1))
-                .series(new AASeriesElement[]{greenSeries, irSeries, redSeries})
-                .dataLabelsEnabled(false);
-        chartViewGIR.aa_drawChartWithChartModel(aaChartModelGIR);
-        AAChartModel aaChartModelIMU = new AAChartModel()
-                .chartType(AAChartType.Spline) // 选择折线图
-                .markerRadius(0)
-                .xAxisLabelsEnabled(false)
-                .scrollablePlotArea(new AAScrollablePlotArea()
-                        .minWidth(800)
-                        .minHeight(400)
-                        .opacity(1f)
-                        .scrollPositionX(1)
-                        .scrollPositionY(1))
-                .series(new AASeriesElement[]{xSeries, ySeries, zSeries})
-                .dataLabelsEnabled(false);
-        chartViewIMU.aa_drawChartWithChartModel(aaChartModelIMU);
-        NotificationHandler.setAAChartView(chartViewGIR);
-        NotificationHandler.setAAChartViewXYZ(chartViewIMU);
     }
 }
