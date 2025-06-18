@@ -23,6 +23,8 @@ import org.opencv.imgproc.Imgproc;
 
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import okhttp3.OkHttpClient;
 import retrofit2.Retrofit;
@@ -36,6 +38,7 @@ public class FacePreprocessor {
     private Context context;
     private int invalidFrameCount = 0;
     private final int MAX_INVALID_FRAMES = 60;
+    private final ExecutorService worker = Executors.newSingleThreadExecutor();
 
     private Retrofit retrofit;
 
@@ -82,7 +85,7 @@ public class FacePreprocessor {
      * @param bitmap     原始位图
      */
     public void addFrameResults(FaceMeshResult result, Bitmap bitmap) {
-        processLandmarksInOrder(result,bitmap);
+        worker.execute(() -> processLandmarksInOrder(result,bitmap));
     }
 
     /**
@@ -90,10 +93,7 @@ public class FacePreprocessor {
      *
      */
     private void processLandmarksInOrder(FaceMeshResult result,Bitmap bitmap) {
-
-        new Thread(() -> {
-            final long nowMs = System.currentTimeMillis();
-            final long startTime = System.nanoTime();
+         final long nowMs = System.currentTimeMillis();
             float[][][][] afterPreprocess = new float[1][36][36][3];
             RectF box = new RectF(-100, -100, -100, -100);
             Rect box_ = new Rect(-100, -100, -100, -100);
@@ -166,17 +166,14 @@ public class FacePreprocessor {
                     // ✅ 检测到了人脸，重置计数器
                     invalidFrameCount = 0;
                 }
-                Float hr = heartRateEstimator.estimateFromFrame(currentFrame,nowMs);
-                if (hr != null) {
-                    heartRateViewModel.setHeartRate(hr);
-                }
+                heartRateEstimator.estimateFromFrame(currentFrame,nowMs);
+
             } catch (Exception e) {
                 e.printStackTrace();
             } finally {
 
             }
 
-        }).start();
     }
 
     private Mat processFrame(Mat frame, org.opencv.core.Rect box_, Size resolution) {
@@ -185,6 +182,10 @@ public class FacePreprocessor {
 
         int correctedWidth = Math.min(box_.width, width - box_.x);
         int correctedHeight = Math.min(box_.height, height - box_.y);
+        if (correctedWidth <= 0 || correctedHeight <= 0) {
+            Log.w(TAG, "processFrame: ROI empty, skip this frame");
+            return null;
+        }
         org.opencv.core.Rect correctedBox = new org.opencv.core.Rect(box_.x, box_.y, correctedWidth, correctedHeight);
 
         Mat cropped = new Mat(frame, correctedBox);

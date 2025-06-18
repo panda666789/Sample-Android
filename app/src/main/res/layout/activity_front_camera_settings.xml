@@ -30,6 +30,12 @@
             android:layout_height="wrap_content"
             android:text="AVI"
             android:layout_marginStart="16dp" />
+        <RadioButton
+            android:id="@+id/radioNone"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="None"
+            android:layout_marginStart="16dp" />
     </RadioGroup>
 
     <TextView

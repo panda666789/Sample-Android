@@ -16,7 +16,7 @@ public class FrontCameraSettingsActivity extends AppCompatActivity {
     private RadioGroup radioGroupFormat;
     private RadioButton radioMp4;
     private RadioButton radioAvi;
-
+    private RadioButton radioNone;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -30,6 +30,7 @@ public class FrontCameraSettingsActivity extends AppCompatActivity {
         radioGroupFormat = findViewById(R.id.radioGroupFormat);
         radioMp4 = findViewById(R.id.radioMp4);
         radioAvi = findViewById(R.id.radioAvi);
+        radioNone = findViewById(R.id.radioNone);
         TextView info = findViewById(R.id.settingsInfo);
         info.setText("这里是前置录制设备的设置页");
 
@@ -43,8 +44,11 @@ public class FrontCameraSettingsActivity extends AppCompatActivity {
         radioGroupFormat.setVisibility(enabled ? RadioGroup.VISIBLE : RadioGroup.GONE);
         if ("avi".equals(format)) {
             radioAvi.setChecked(true);
-        } else {
+        } else if ("mp4".equals(format)) {
             radioMp4.setChecked(true);
+        }
+        else{
+            radioNone.setChecked(true);
         }
 
         // 监听切换推理开关
@@ -57,7 +61,16 @@ public class FrontCameraSettingsActivity extends AppCompatActivity {
 
         // 监听格式选择
         radioGroupFormat.setOnCheckedChangeListener((group, checkedId) -> {
-            String selected = (checkedId == R.id.radioAvi) ? "avi" : "mp4";
+            String selected;
+            if(checkedId == R.id.radioAvi){
+                selected = "avi";
+            }
+            else if(checkedId == R.id.radioMp4){
+                selected = "mp4";
+            }
+            else{
+                selected = "none";
+            }
             prefs.edit()
                     .putString("video_format", selected)
                     .apply();

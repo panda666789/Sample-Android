@@ -121,99 +121,98 @@ public class HeartRateEstimator {
         welchCount = 300 - 240; // 初始化
     }
 
-    public Float estimateFromFrame(float[][][] frame,Long nowMs) throws Exception {
+    public Float estimateFromFrame(float[][][] frame, long nowMs) throws Exception {
+
+        // 避免并发调用
         if (!isRunning.compareAndSet(false, true)) {
             return null;
         }
-        float output;      // instant signal output
-        Float hrResult = null;  // 心率结果，如果没算出来就保持 null
+
+        Float hrResult = null;   // 本帧推断出的 HR；若未达到 300 帧窗口则保持 null
+        float output    = 0f;    // 本帧瞬时信号输出
+
         try {
-
+            /* ---------- 1. 更新时间戳 & 计算 Δt ---------- */
             timeStamps.addLast(nowMs);
-            if (timeStamps.size() > 300) {
-                timeStamps.removeFirst();
-            }
-            float dtSeconds = 1f / 30f;
+            if (timeStamps.size() > 300) timeStamps.removeFirst();
+
+            float dtSeconds = 1f / 30f;          // 默认假设 30 FPS
             if (timeStamps.size() > 1) {
-                Long[] tsArray = timeStamps.toArray(new Long[0]);
-                long prevMs = tsArray[tsArray.length - 2];
-                dtSeconds = Math.max((nowMs - prevMs) / 1000f, 1f / 90f);
+                Long[] ts = timeStamps.toArray(new Long[0]);
+                long prevMs = ts[ts.length - 2];
+                dtSeconds = Math.max((nowMs - prevMs) / 1000f, 1f / 90f);  // 下限 11 ms
             }
 
-            frameBuffer.clear(); // 位置=0, limit=capacity
+            /* ---------- 2. 把 36×36×3 写入 frameBuffer ---------- */
+            frameBuffer.clear();
             for (int y = 0; y < 36; y++) {
                 for (int x = 0; x < 36; x++) {
-                    float[] pixel = frame[y][x];
-                    frameBuffer.put(pixel[0]);
-                    frameBuffer.put(pixel[1]);
-                    frameBuffer.put(pixel[2]);
+                    float[] p = frame[y][x];
+                    frameBuffer.put(p[0]).put(p[1]).put(p[2]);
                 }
             }
-            frameBuffer.flip(); // 位置=0, limit=写入数据量
+            frameBuffer.flip();
 
-            dtBuffer.put(0, dtSeconds);
-            dtBuffer.rewind();
-            if (dtTensor != null) {
-                dtTensor.close();
+            /* ---------- 3. 组装输入 & 运行信号模型 ---------- */
+            // Δt tensor（标量）——局部变量，用完即关
+            dtBuffer.put(0, dtSeconds).rewind();
+
+            try (OnnxTensor inputTensor  = OnnxTensor.createTensor(env, frameBuffer, frameShape);
+                 OnnxTensor dtTensor     = OnnxTensor.createTensor(env, dtBuffer, new long[]{})) {
+
+                // 3-1 组装 feed：把上一帧隐藏状态 + 本帧输入放进去
+                Map<String, OnnxTensor> feeds = new HashMap<>(state); // 这里的 state 来自 lastResult
+                feeds.put("arg_0.1",      inputTensor);
+                feeds.put("onnx::Mul_37", dtTensor);
+
+                // 3-2 执行推理（Result 这次先不关闭，要把内部 tensor 留做下一帧隐藏状态）
+                OrtSession.Result result = signalSession.run(feeds);
+
+                /* ---------- 4. 读取输出 ---------- */
+                float[][] outArr = (float[][]) result.get(0).getValue();
+                output = outArr[0][0];
+
+                /* ---------- 5. 更新隐藏状态 ---------- */
+                // 先关闭上一帧 Result（它会连带关闭旧隐藏状态 tensor）
+                if (lastResult != null) {
+                    lastResult.close();
+                }
+                state.clear();
+
+                // 把当前 Result 中除第 0 个以外的 tensor 存进 state
+                List<String> inNames = new ArrayList<>(signalSession.getInputNames());
+                for (int i = 1; i < result.size(); i++) {
+                    state.put(inNames.get(i), (OnnxTensor) result.get(i));
+                }
+                // 缓存本帧 Result，留到下一帧再 close
+                lastResult = result;
             }
-            dtTensor = OnnxTensor.createTensor(env, dtBuffer, new long[]{});
-            signalFeeds.clear();
 
-            OnnxTensor inputTensor = OnnxTensor.createTensor(env, frameBuffer, frameShape);
-            signalFeeds.put("arg_0.1", inputTensor);
-            signalFeeds.put("onnx::Mul_37", dtTensor);
-            signalFeeds.putAll(state);
+            /* ---------- 6. 滤波、绘图、300 帧采样 ---------- */
+            output = (kfOutput == null) ? (kfOutput = new KalmanFilter1D(1f, 0.5f, output, 1f)).update(output)
+                    : kfOutput.update(output);
 
-            float resultValue = 0f;
-            OrtSession.Result result = signalSession.run(signalFeeds);
-            float[][] outputArr = (float[][]) result.get(0).getValue();
-            output = outputArr[0][0];
-            List<String> inputNames = new ArrayList<>(signalSession.getInputNames());
-            for (int i = 1; i < result.size(); i++) {
-                String key = inputNames.get(i);
-                state.put(key, (OnnxTensor) result.get(i));
-            }
-
-            if (kfOutput == null) {
-                kfOutput = new KalmanFilter1D(1f, 0.5f, output, 1f);
-            } else {
-                output = kfOutput.update(output);
-            }
             signalOutput.add(output);
+            if (signalOutput.size() > 300) signalOutput.remove(0);
             plotView.addValue(output);
 
-            if (signalOutput.size() > 300) {
-                signalOutput.remove(0);
-            }
-
-
             welchCount++;
-            isRunning.set(false);
             if (signalOutput.size() == 300 && welchCount >= 300) {
-                welchCount = 270;
-                hrResult = estimateHRFromSignal(signalOutput);
+                welchCount = 270;                 // 重置计数
+                hrResult   = estimateHRFromSignal(signalOutput);
             }
 
         } finally {
-            isRunning.set(false);
-
+            isRunning.set(false);                 // 无论成功/异常都允许下一帧进入
         }
+
+        /* ---------- 7. 日志写入 ---------- */
         try {
-            StringBuilder sb = new StringBuilder()
-                    .append(nowMs)
-                    .append(',')
-                    .append(output)
-                    .append(',');
-            if (hrResult != null) {
-                sb.append(hrResult);
-            }
-            sb.append('\n');
-            csvWriter.write(sb.toString());
+            csvWriter.write(nowMs + "," + output + (hrResult != null ? "," + hrResult : "") + '\n');
             csvWriter.flush();
         } catch (IOException e) {
-            Log.e("TAG", "写入 CSV 失败", e);
+            Log.e("HeartRateEstimator", "写入 CSV 失败", e);
         }
-        // ——————————————————————————————
 
         return hrResult;
     }

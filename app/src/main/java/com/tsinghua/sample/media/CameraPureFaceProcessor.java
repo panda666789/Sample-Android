@@ -56,7 +56,7 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Comparator;
 
-public class CameraFaceProcessor {
+public class CameraPureFaceProcessor {
     private static final String TAG = "CameraFaceProcessor";
     private static final boolean RUN_ON_GPU = true;
     private static final int CAMERA_PERMISSION_REQUEST_CODE = 200;
@@ -101,7 +101,7 @@ public class CameraFaceProcessor {
         void onFaceProcessingResult(Object result); // Replace Object with your specific result type
     }
 
-    public CameraFaceProcessor(Context activity, SurfaceView surfaceView, PlotView plotView)  {
+    public CameraPureFaceProcessor(Context activity, SurfaceView surfaceView, PlotView plotView)  {
 
         this.activity = activity;
         this.surfaceView = surfaceView;
@@ -162,7 +162,7 @@ public class CameraFaceProcessor {
 
     private void setupImageReader(int width, int height) {
         if (width > 0 && height > 0) {
-            imageReader = ImageReader.newInstance(640, 480, ImageFormat.JPEG, 2);
+            imageReader = ImageReader.newInstance(640, 480, ImageFormat.YUV_420_888, 2);
             imageReader.setOnImageAvailableListener(onImageAvailableListener, backgroundHandler);
         } else {
             Log.e(TAG, "Invalid dimensions for ImageReader: width=" + width + ", height=" + height);
@@ -178,27 +178,15 @@ public class CameraFaceProcessor {
             image = reader.acquireNextImage();
             if (image != null && isCameraRunning) {
 
-                ByteBuffer buffer = image.getPlanes()[0].getBuffer();
-                byte[] bytes = new byte[buffer.remaining()];
-                buffer.get(bytes);
-                long ts = System.currentTimeMillis();
-                String filename = String.format("%d_frame_%06d.jpg", ts, frameCount);
-                File f = new File(tempDir, filename);
-                try (FileOutputStream out = new FileOutputStream(f)) {
-                    out.write(bytes);
-                }
-                Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length)
-                        .copy(Bitmap.Config.ARGB_8888, true);
+                Bitmap bitmap = convertYUVToBitmap(image,270);
 
-                // 4. 旋转、送给 FaceMesh
-                Bitmap rotated = rotateBitmap(bitmap, 270);
                 long timestamp = System.nanoTime();
 
-                faceMesh.send(rotated, timestamp);
+                faceMesh.send(bitmap, timestamp);
                 faceMesh.setResultListener(result -> {
                     if (isCameraRunning) {
                         // 如果还需要原始方向的 bitmap 作后续处理，可以再 copy 一份
-                        facePreProcessor.addFrameResults(result, rotated.copy(Bitmap.Config.ARGB_8888, true));
+                        facePreProcessor.addFrameResults(result, bitmap.copy(Bitmap.Config.ARGB_8888, true));
                     }
                 });
             }
@@ -294,7 +282,7 @@ public class CameraFaceProcessor {
         if (callback != null) {
             callback.onCameraStopped();
         }
-        new Thread(this::generateAndUploadVideo).start();
+        //new Thread(this::generateAndUploadVideo).start();
 
     }
     private void generateAndUploadVideo() {

@@ -531,7 +531,7 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
 
     // 模拟开始录制指环数据
     private void startRingRecording() {
-        NotificationHandler.clearAllData();
+        //NotificationHandler.clearAllData();
         if (!isRecordingRing) {
             isRecordingRing = true;
             btnStartRing.setText("停止指环");

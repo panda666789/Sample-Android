@@ -30,6 +30,7 @@ import com.tsinghua.sample.activity.RingSettingsActivity;
 import com.tsinghua.sample.device.OximeterService;
 import com.tsinghua.sample.media.CameraFaceProcessor;
 import com.tsinghua.sample.media.CameraHelper;
+import com.tsinghua.sample.media.CameraPureFaceProcessor;
 import com.tsinghua.sample.media.IMURecorder;
 import com.tsinghua.sample.media.MultiMicAudioRecorderHelper;
 import com.tsinghua.sample.media.RecorderHelper;
@@ -118,29 +119,57 @@ public class DeviceAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder>
             SharedPreferences prefs = context.getSharedPreferences("AppSettings", Context.MODE_PRIVATE);
             boolean enableInference = prefs.getBoolean("enable_inference", false);
             if(enableInference){
-                h.itemView.setOnClickListener(v -> {
-                    h.toggleInfo();
-                });
+                String enableRecording = prefs.getString("video_format", "none");
+                if(enableRecording.equals("none")){
+                    h.itemView.setOnClickListener(v -> {
+                        h.toggleInfo();
+                    });
 
-                CameraFaceProcessor cameraFaceProcessor = null;
-                try {
-                    cameraFaceProcessor = new CameraFaceProcessor(context, h.surfaceView,h.plotView);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-
-                CameraFaceProcessor finalCameraFaceProcessor = cameraFaceProcessor;
-                h.startBtn.setOnClickListener(v -> {
-                    if (device.isRunning()) {
-                        finalCameraFaceProcessor.stopCamera();
-                        device.setRunning(false);
-                        h.startBtn.setText("开始");
-                    } else {
-                        finalCameraFaceProcessor.startCamera();
-                        device.setRunning(true);
-                        h.startBtn.setText("结束");
+                    CameraPureFaceProcessor cameraPureFaceProcessor = null;
+                    try {
+                        cameraPureFaceProcessor = new CameraPureFaceProcessor(context, h.surfaceView, h.plotView);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
                     }
-                });
+
+                    CameraPureFaceProcessor finalCameraPureFaceProcessor = cameraPureFaceProcessor;
+                    h.startBtn.setOnClickListener(v -> {
+                        if (device.isRunning()) {
+                            finalCameraPureFaceProcessor.stopCamera();
+                            device.setRunning(false);
+                            h.startBtn.setText("开始");
+                        } else {
+                            finalCameraPureFaceProcessor.startCamera();
+                            device.setRunning(true);
+                            h.startBtn.setText("结束");
+                        }
+                    });
+                }
+                else {
+                    h.itemView.setOnClickListener(v -> {
+                        h.toggleInfo();
+                    });
+
+                    CameraFaceProcessor cameraFaceProcessor = null;
+                    try {
+                        cameraFaceProcessor = new CameraFaceProcessor(context, h.surfaceView, h.plotView);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+
+                    CameraFaceProcessor finalCameraFaceProcessor = cameraFaceProcessor;
+                    h.startBtn.setOnClickListener(v -> {
+                        if (device.isRunning()) {
+                            finalCameraFaceProcessor.stopCamera();
+                            device.setRunning(false);
+                            h.startBtn.setText("开始");
+                        } else {
+                            finalCameraFaceProcessor.startCamera();
+                            device.setRunning(true);
+                            h.startBtn.setText("结束");
+                        }
+                    });
+                }
 
             }
             else{
@@ -265,12 +294,10 @@ public class DeviceAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder>
 
             h.startBtn.setOnClickListener(v -> {
                 if (device.isRunning()) {
-                    // 停止 IMU 录制
                     h.stopRingRecording();
                     device.setRunning(false);
                     h.startBtn.setText("开始");
                 } else {
-                    // 启动 IMU 录制
                     h.startRingRecording(context);
                     device.setRunning(true);
                     h.startBtn.setText("结束");
