@@ -45,7 +45,7 @@
         android:padding="8dp"
         android:background="#EFEFEF">
 
-        <!-- 蓝牙连接区域 -->
+        <!-- 第一行：蓝牙连接和时间操作 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -58,7 +58,39 @@
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
                 android:text="连接蓝牙"
-                android:layout_marginEnd="4dp" />
+                android:layout_marginEnd="4dp"
+                android:background="@android:color/holo_blue_dark"
+                android:textColor="@android:color/white" />
+
+            <Button
+                android:id="@+id/timeUpdateBtn"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="更新时间"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
+                android:background="@android:color/holo_purple"
+                android:textColor="@android:color/white" />
+
+            <Button
+                android:id="@+id/timeSyncBtn"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="时间校准"
+                android:layout_marginStart="4dp"
+                android:background="@android:color/holo_orange_light"
+                android:textColor="@android:color/white" />
+
+        </LinearLayout>
+
+        <!-- 第二行：批量文件操作 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
 
             <Button
                 android:id="@+id/requestFileListBtn"
@@ -66,7 +98,6 @@
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
                 android:text="获取文件列表"
-                android:layout_marginStart="4dp"
                 android:layout_marginEnd="4dp"
                 android:background="@android:color/holo_blue_light"
                 android:textColor="@android:color/white" />
@@ -81,29 +112,87 @@
                 android:background="@android:color/holo_green_light"
                 android:textColor="@android:color/white"
                 android:enabled="false" />
+
+        </LinearLayout>
+
+        <!-- 第三行：单个文件下载 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp"
+            android:background="#F0F8FF"
+            android:padding="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="文件名："
+                android:textSize="12sp"
+                android:textColor="#333"
+                android:layout_gravity="center_vertical"
+                android:layout_marginEnd="4dp" />
+
+            <EditText
+                android:id="@+id/editText_file_name"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="36dp"
+                android:hint="例: 010203040506_1722909000000000_7.txt"
+                android:textSize="11sp"
+                android:background="@android:color/white"
+                android:padding="6dp"
+                android:layout_marginEnd="4dp"
+                android:inputType="text"
+                android:maxLines="1" />
+
+            <Button
+                android:id="@+id/btn_download_single_file"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="下载"
+                android:textSize="12sp"
+                android:background="@android:color/holo_red_light"
+                android:textColor="@android:color/white"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp" />
+
         </LinearLayout>
 
         <!-- 状态日志显示区域 -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="状态日志:"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textColor="#333"
-            android:layout_marginBottom="4dp"/>
-
-        <TextView
-            android:id="@+id/tvLog"
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="60dp"
-            android:text="等待操作..."
-            android:textSize="11sp"
-            android:textColor="#000"
-            android:background="#F5F5F5"
-            android:padding="8dp"
-            android:scrollbars="vertical"
-            android:layout_marginBottom="12dp" />
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="状态日志:"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#333"
+                android:layout_marginBottom="4dp"/>
+
+            <ScrollView
+                android:layout_width="match_parent"
+                android:layout_height="80dp"
+                android:background="#F5F5F5"
+                android:padding="4dp">
+
+                <TextView
+                    android:id="@+id/tvLog"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="等待操作..."
+                    android:textSize="11sp"
+                    android:textColor="#000"
+                    android:padding="4dp" />
+
+            </ScrollView>
+
+        </LinearLayout>
 
         <!-- 实时数据图表区域 -->
         <TextView
@@ -115,123 +204,168 @@
             android:textColor="#333"
             android:layout_marginBottom="8dp"/>
 
-        <!-- Green PlotView with Text -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Green Data (PPG绿光)"
-            android:textSize="12sp"
-            android:textColor="#00AA00"
-            android:textStyle="bold"
-            android:paddingTop="4dp"/>
-        <com.tsinghua.sample.PlotView
-            android:id="@+id/plotViewG"
+        <!-- PPG数据区域 -->
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="80dp"
-            android:background="#F8F8F8"
-            android:layout_marginBottom="8dp" />
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="#F8FFF8"
+            android:padding="6dp"
+            android:layout_marginBottom="8dp">
 
-        <!-- IR PlotView with Text -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="IR Data (PPG红外)"
-            android:textSize="12sp"
-            android:textColor="#0000AA"
-            android:textStyle="bold"
-            android:paddingTop="4dp"/>
-        <com.tsinghua.sample.PlotView
-            android:id="@+id/plotViewI"
-            android:layout_width="match_parent"
-            android:layout_height="80dp"
-            android:background="#F8F8F8"
-            android:layout_marginBottom="8dp" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📊 PPG光电容积脉搏波数据"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#2E7D32"
+                android:layout_marginBottom="6dp"/>
 
-        <!-- Red PlotView with Text -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Red Data (PPG红光)"
-            android:textSize="12sp"
-            android:textColor="#AA0000"
-            android:textStyle="bold"
-            android:paddingTop="4dp"/>
-        <com.tsinghua.sample.PlotView
-            android:id="@+id/plotViewR"
-            android:layout_width="match_parent"
-            android:layout_height="80dp"
-            android:background="#F8F8F8"
-            android:layout_marginBottom="8dp" />
+            <!-- Green PlotView -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🟢 Green Data (PPG绿光)"
+                android:textSize="11sp"
+                android:textColor="#00AA00"
+                android:textStyle="bold"
+                android:paddingTop="2dp"/>
+            <com.tsinghua.sample.PlotView
+                android:id="@+id/plotViewG"
+                android:layout_width="match_parent"
+                android:layout_height="70dp"
+                android:background="#FFFFFF"
+                android:layout_marginBottom="6dp" />
+
+            <!-- IR PlotView -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔴 IR Data (PPG红外)"
+                android:textSize="11sp"
+                android:textColor="#0000AA"
+                android:textStyle="bold"
+                android:paddingTop="2dp"/>
+            <com.tsinghua.sample.PlotView
+                android:id="@+id/plotViewI"
+                android:layout_width="match_parent"
+                android:layout_height="70dp"
+                android:background="#FFFFFF"
+                android:layout_marginBottom="6dp" />
+
+            <!-- Red PlotView -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔴 Red Data (PPG红光)"
+                android:textSize="11sp"
+                android:textColor="#AA0000"
+                android:textStyle="bold"
+                android:paddingTop="2dp"/>
+            <com.tsinghua.sample.PlotView
+                android:id="@+id/plotViewR"
+                android:layout_width="match_parent"
+                android:layout_height="70dp"
+                android:background="#FFFFFF"
+                android:layout_marginBottom="6dp" />
+
+        </LinearLayout>
 
         <!-- 加速度数据区域 -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="加速度数据:"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textColor="#333"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="4dp"/>
-
-        <!-- X PlotView with Text -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="X Axis (X轴加速度)"
-            android:textSize="12sp"
-            android:textColor="#AAAA00"
-            android:textStyle="bold"
-            android:paddingTop="4dp"/>
-        <com.tsinghua.sample.PlotView
-            android:id="@+id/plotViewX"
-            android:layout_width="match_parent"
-            android:layout_height="80dp"
-            android:background="#F8F8F8"
-            android:layout_marginBottom="8dp" />
-
-        <!-- Y PlotView with Text -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Y Axis (Y轴加速度)"
-            android:textSize="12sp"
-            android:textColor="#AA00AA"
-            android:textStyle="bold"
-            android:paddingTop="4dp"/>
-        <com.tsinghua.sample.PlotView
-            android:id="@+id/plotViewY"
-            android:layout_width="match_parent"
-            android:layout_height="80dp"
-            android:background="#F8F8F8"
-            android:layout_marginBottom="8dp" />
-
-        <!-- Z PlotView with Text -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Z Axis (Z轴加速度)"
-            android:textSize="12sp"
-            android:textColor="#00AAAA"
-            android:textStyle="bold"
-            android:paddingTop="4dp"/>
-        <com.tsinghua.sample.PlotView
-            android:id="@+id/plotViewZ"
-            android:layout_width="match_parent"
-            android:layout_height="80dp"
-            android:background="#F8F8F8"
-            android:layout_marginBottom="8dp" />
-
-        <!-- 文件操作说明 -->
-        <TextView
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="📁 文件操作说明:\n1. 点击'获取文件列表'查看设备中的文件\n2. 点击'下载文件'将所有文件自动保存到日志文件夹\n3. 文件会按类型解析并保存为可读格式"
-            android:textSize="10sp"
-            android:textColor="#666"
+            android:orientation="vertical"
+            android:background="#FFF8F0"
+            android:padding="6dp"
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📱 三轴加速度传感器数据"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#E65100"
+                android:layout_marginBottom="6dp"/>
+
+            <!-- X PlotView -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📏 X Axis (X轴加速度)"
+                android:textSize="11sp"
+                android:textColor="#AAAA00"
+                android:textStyle="bold"
+                android:paddingTop="2dp"/>
+            <com.tsinghua.sample.PlotView
+                android:id="@+id/plotViewX"
+                android:layout_width="match_parent"
+                android:layout_height="70dp"
+                android:background="#FFFFFF"
+                android:layout_marginBottom="6dp" />
+
+            <!-- Y PlotView -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📏 Y Axis (Y轴加速度)"
+                android:textSize="11sp"
+                android:textColor="#AA00AA"
+                android:textStyle="bold"
+                android:paddingTop="2dp"/>
+            <com.tsinghua.sample.PlotView
+                android:id="@+id/plotViewY"
+                android:layout_width="match_parent"
+                android:layout_height="70dp"
+                android:background="#FFFFFF"
+                android:layout_marginBottom="6dp" />
+
+            <!-- Z PlotView -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📏 Z Axis (Z轴加速度)"
+                android:textSize="11sp"
+                android:textColor="#00AAAA"
+                android:textStyle="bold"
+                android:paddingTop="2dp"/>
+            <com.tsinghua.sample.PlotView
+                android:id="@+id/plotViewZ"
+                android:layout_width="match_parent"
+                android:layout_height="70dp"
+                android:background="#FFFFFF"
+                android:layout_marginBottom="6dp" />
+
+        </LinearLayout>
+
+        <!-- 操作说明 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
             android:background="#E8F4FD"
-            android:padding="8dp"
-            android:layout_marginTop="8dp" />
+            android:padding="8dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="📱 操作说明"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#1565C0"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🔗 蓝牙连接: 建立与戒指设备的BLE连接\n\n⏰ 时间同步:\n  • 更新时间: 将主机当前时间同步到戒指，设置戒指系统时钟\n  • 时间校准: 测量主机与戒指的时间同步质量和延迟\n  • 建议流程: 先更新时间 → 再时间校准 → 然后进行数据采集\n\n📁 文件操作:\n  • 获取文件列表: 查看设备中存储的所有历史数据文件\n  • 批量下载: 下载文件列表中的所有文件\n  • 单个下载: 手动输入文件名进行精确下载\n  • 文件格式: 用户ID_时间戳_类型.txt (如: 010203040506_1722909000000000_7.txt)\n\n📊 实时数据: 显示来自戒指传感器的实时PPG和加速度数据\n  • PPG数据用于心率、血氧等生理参数监测\n  • 加速度数据用于运动状态和姿态检测"
+                android:textSize="10sp"
+                android:textColor="#424242"
+                android:lineSpacingMultiplier="1.2" />
+
+        </LinearLayout>
 
     </LinearLayout>
 </LinearLayout>

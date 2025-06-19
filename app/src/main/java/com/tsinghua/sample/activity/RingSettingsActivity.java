@@ -41,7 +41,7 @@ public class RingSettingsActivity extends AppCompatActivity {
             }
 
             // 解析扫描到的设备数据
-            BleDeviceInfo bleDeviceInfo = LogicalApi.getBleDeviceInfoWhenBleScan(device, rssi, bytes);
+            BleDeviceInfo bleDeviceInfo = LogicalApi.getBleDeviceInfoWhenBleScan(device, rssi, bytes,true);
             if (bleDeviceInfo != null) {
                 Log.e("RingLog", bleDeviceInfo.getDevice().getName() + " - " + bleDeviceInfo.getDevice().getAddress());
 

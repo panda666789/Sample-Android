@@ -22,7 +22,14 @@ public class NotificationHandler {
         void onFileDataReceived(byte[] data);
     }
 
+    // 新增：时间操作回调接口（包含校准和更新）
+    public interface TimeSyncCallback {
+        void onTimeSyncResponse(byte[] data);
+        void onTimeUpdateResponse(byte[] data);
+    }
+
     private static FileResponseCallback fileResponseCallback;
+    private static TimeSyncCallback timeSyncCallback; // 新增
 
     // 设置PlotView的方法
     public static void setPlotViewG(PlotView chartView) { plotViewG = chartView; }
@@ -36,6 +43,12 @@ public class NotificationHandler {
     public static void setFileResponseCallback(FileResponseCallback callback) {
         fileResponseCallback = callback;
         Log.d(TAG, "File response callback set");
+    }
+
+    // 新增：设置时间校准回调
+    public static void setTimeSyncCallback(TimeSyncCallback callback) {
+        timeSyncCallback = callback;
+        Log.d(TAG, "Time sync callback set");
     }
 
     /**
@@ -92,8 +105,12 @@ public class NotificationHandler {
         Log.d(TAG, String.format("Received data: FrameType=0x%02X, FrameID=0x%02X, Cmd=0x%02X, Subcmd=0x%02X, Length=%d",
                 frameType, frameId, cmd, subcmd, data.length));
 
+        // 新增：时间校准处理 (Cmd = 0x10)
+        if (cmd == 0x10) {
+            return handleTimeSyncOperations(data, frameId, subcmd);
+        }
         // 文件操作处理 (Cmd = 0x36)
-        if (cmd == 0x36) {
+        else if (cmd == 0x36) {
             return handleFileOperations(data, frameId, subcmd);
         }
         // 实时数据处理 (Cmd = 0x3C)
@@ -104,6 +121,89 @@ public class NotificationHandler {
         else {
             String result = "Unknown command: 0x" + String.format("%02X", cmd);
             Log.w(TAG, result);
+            return result;
+        }
+    }
+
+    /**
+     * 新增：处理时间操作相关的响应 (Cmd = 0x10)
+     */
+    private static String handleTimeSyncOperations(byte[] data, int frameId, int subcmd) {
+        Log.d(TAG, String.format("Handling time operation: Subcmd=0x%02X", subcmd));
+
+        switch (subcmd) {
+            case 0x00: // 时间更新响应
+                return handleTimeUpdateResponse(data, frameId);
+
+            case 0x02: // 时间校准响应
+                return handleTimeSyncResponse(data, frameId);
+
+            default:
+                String result = "Unknown time operation subcmd: 0x" + String.format("%02X", subcmd);
+                Log.w(TAG, result);
+                return result;
+        }
+    }
+
+    /**
+     * 新增：处理时间更新响应
+     */
+    private static String handleTimeUpdateResponse(byte[] data, int frameId) {
+        Log.d(TAG, "Processing time update response");
+
+        try {
+            // 通知回调处理详细解析
+            if (timeSyncCallback != null) {
+                timeSyncCallback.onTimeUpdateResponse(data);
+            } else {
+                Log.w(TAG, "Time sync callback is null");
+            }
+
+            // 返回简单的状态信息
+            String result = String.format("Time Update Response (Frame ID: %d): Success", frameId);
+            Log.i(TAG, result);
+            return result;
+
+        } catch (Exception e) {
+            String result = "Error processing time update response: " + e.getMessage();
+            Log.e(TAG, result, e);
+            return result;
+        }
+    }
+
+    /**
+     * 新增：处理时间校准响应
+     */
+    private static String handleTimeSyncResponse(byte[] data, int frameId) {
+        Log.d(TAG, "Processing time sync response");
+
+        try {
+            // 通知回调处理详细解析
+            if (timeSyncCallback != null) {
+                timeSyncCallback.onTimeSyncResponse(data);
+            } else {
+                Log.w(TAG, "Time sync callback is null");
+            }
+
+            // 返回简单的状态信息 - 使用小端序读取
+            if (data.length >= 28) { // 4字节帧头 + 24字节数据
+                long hostSentTime = readUInt64LE(data, 4);
+                long ringReceivedTime = readUInt64LE(data, 12);
+                long ringUploadTime = readUInt64LE(data, 20);
+
+                String result = String.format("Time Sync Response (Frame ID: %d): Host=%d, Ring RX=%d, Ring TX=%d",
+                        frameId, hostSentTime, ringReceivedTime, ringUploadTime);
+                Log.i(TAG, result);
+                return result;
+            } else {
+                String result = "Invalid time sync response length: " + data.length;
+                Log.e(TAG, result);
+                return result;
+            }
+
+        } catch (Exception e) {
+            String result = "Error processing time sync response: " + e.getMessage();
+            Log.e(TAG, result, e);
             return result;
         }
     }

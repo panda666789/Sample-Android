@@ -131,7 +131,7 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
             if (device == null || TextUtils.isEmpty(device.getName())) {
                 return;
             }
-            BleDeviceInfo bleDeviceInfo = LogicalApi.getBleDeviceInfoWhenBleScan(device, rssi, bytes);
+            BleDeviceInfo bleDeviceInfo = LogicalApi.getBleDeviceInfoWhenBleScan(device, rssi, bytes,true);
             Log.e("RingLog",bleDeviceInfo.toString());
         }
     };
@@ -751,6 +751,11 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
     }
 
     @Override
+    public void battery_push(byte b, byte datum) {
+
+    }
+
+    @Override
     public void timeOut() {
 
     }
@@ -847,6 +852,11 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
     }
 
     @Override
+    public void TOUCH_AUDIO_FINISH_XUN_FEI() {
+
+    }
+
+    @Override
     public void setAudio(short i, int i1, byte[] bytes) {
 
     }
@@ -868,6 +878,16 @@ public class MainActivity extends AppCompatActivity implements IResponseListener
 
     @Override
     public void SystemControl(SystemControlBean systemControlBean) {
+
+    }
+
+    @Override
+    public void setUserInfo(byte result) {
+
+    }
+
+    @Override
+    public void getUserInfo(int sex, int height, int weight, int age) {
 
     }
 

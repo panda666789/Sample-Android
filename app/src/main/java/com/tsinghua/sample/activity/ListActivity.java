@@ -296,7 +296,6 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
             new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
                 @Override
                 public void run() {
-                    LmAPI.SYNC_TIME();
                 }
             }, 500); // 延迟 2 秒（2000 毫秒）
             new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
@@ -349,6 +348,11 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
         if (b == 0) {
             ringViewHolder.recordLog("电池电量为" + b1);
         }
+    }
+
+    @Override
+    public void battery_push(byte b, byte datum) {
+
     }
 
     @Override
@@ -448,6 +452,11 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
     }
 
     @Override
+    public void TOUCH_AUDIO_FINISH_XUN_FEI() {
+
+    }
+
+    @Override
     public void setAudio(short i, int i1, byte[] bytes) {
 
     }
@@ -469,6 +478,16 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
 
     @Override
     public void SystemControl(SystemControlBean systemControlBean) {
+
+    }
+
+    @Override
+    public void setUserInfo(byte result) {
+
+    }
+
+    @Override
+    public void getUserInfo(int sex, int height, int weight, int age) {
 
     }
 
