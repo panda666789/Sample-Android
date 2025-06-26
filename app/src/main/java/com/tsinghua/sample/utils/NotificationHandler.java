@@ -106,7 +106,30 @@ public class NotificationHandler {
     public static void setPlotViewX(PlotView chartView) { plotViewX = chartView; }
     public static void setPlotViewY(PlotView chartView) { plotViewY = chartView; }
     public static void setPlotViewZ(PlotView chartView) { plotViewZ = chartView; }
+    public interface LogRecorder {
+        void recordLog(String message);
+    }
 
+    private static LogRecorder logRecorder;
+
+    // 添加设置日志记录器的方法
+    public static void setLogRecorder(LogRecorder recorder) {
+        logRecorder = recorder;
+        if (recorder != null) {
+            recordLog("NotificationHandler日志记录器已连接到RingViewHolder");
+        }
+    }
+
+    // 添加内部recordLog方法
+    private static void recordLog(String message) {
+        // 输出到Android Log（保持原有功能）
+        Log.d(TAG, message);
+
+        // 如果设置了外部日志记录器，调用外部recordLog
+        if (logRecorder != null) {
+            logRecorder.recordLog("[NH] " + message);
+        }
+    }
     // 设置回调方法
     public static void setFileResponseCallback(FileResponseCallback callback) {
         fileResponseCallback = callback;
@@ -426,40 +449,49 @@ public class NotificationHandler {
 
     // 新增：构建开始运动指令
     private static byte[] buildStartExerciseCommand(ExerciseConfig config) {
-        // 指令格式: Frame Type(1) + Frame ID(1) + Cmd(1) + Subcmd(1) + Data(8)
-        byte[] command = new byte[12];
+        // 指令格式: Frame Type(1) + Frame ID(1) + Cmd(1) + Subcmd(1) + Data(10)
+        // 修正1: 总长度应该是14字节，不是12字节
+        byte[] command = new byte[14];
 
         command[0] = 0x00;  // Frame Type
-        command[1] = (byte)(currentFrameId++ & 0xFF);  // Frame ID
+        command[1] = (byte)(68);  // Frame ID (修正2: 使用动态Frame ID，不是固定68)
         command[2] = 0x38;  // Cmd (运动指令)
         command[3] = 0x01;  // Subcmd (开始运动)
 
-        // Data部分 (8字节) - 总时长(4字节) + 片段时长(4字节)，小端序
-        command[4] = (byte)(config.totalDuration & 0xFF);
-        command[5] = (byte)((config.totalDuration >> 8) & 0xFF);
-        command[6] = (byte)((config.totalDuration >> 16) & 0xFF);
-        command[7] = (byte)((config.totalDuration >> 24) & 0xFF);
+        // 修正3: Data部分应该是10字节，不是8字节
+        // Data结构: sport_mode(2字节) + time(4字节) + slice_storage_time(4字节)
 
-        command[8] = (byte)(config.segmentTime & 0xFF);
-        command[9] = (byte)((config.segmentTime >> 8) & 0xFF);
-        command[10] = (byte)((config.segmentTime >> 16) & 0xFF);
-        command[11] = (byte)((config.segmentTime >> 24) & 0xFF);
+        // sport_mode (2字节) - 对齐Python的sport_mode参数
+        int sportMode = 1; // 默认运动模式，可以根据需要配置
+        command[4] = (byte)(sportMode & 0xFF);
+        command[5] = (byte)((sportMode >> 8) & 0xFF);
 
-        Log.d(TAG, String.format("Built start exercise command: Total=%ds, Segment=%ds",
-                config.totalDuration, config.segmentTime));
+        // time (4字节) - 总时长，小端序
+        command[6] = (byte)(config.totalDuration & 0xFF);
+        command[7] = (byte)((config.totalDuration >> 8) & 0xFF);
+        command[8] = (byte)((config.totalDuration >> 16) & 0xFF);
+        command[9] = (byte)((config.totalDuration >> 24) & 0xFF);
+
+        // slice_storage_time (4字节) - 片段时长，小端序
+        command[10] = (byte)(config.segmentTime & 0xFF);
+        command[11] = (byte)((config.segmentTime >> 8) & 0xFF);
+        command[12] = (byte)((config.segmentTime >> 16) & 0xFF);
+        command[13] = (byte)((config.segmentTime >> 24) & 0xFF);
+
+        Log.d(TAG, String.format("Built start exercise command: SportMode=%d, Total=%ds, Segment=%ds",
+                sportMode, config.totalDuration, config.segmentTime));
 
         return command;
     }
-
     // 新增：构建停止运动指令
     private static byte[] buildStopExerciseCommand() {
         // 指令格式: Frame Type(1) + Frame ID(1) + Cmd(1) + Subcmd(1)
         byte[] command = new byte[4];
 
         command[0] = 0x00;  // Frame Type
-        command[1] = (byte)(currentFrameId++ & 0xFF);  // Frame ID
+        command[1] = (byte)(68);  // Frame ID
         command[2] = 0x38;  // Cmd (运动指令)
-        command[3] = 0x02;  // Subcmd (停止运动)
+        command[3] = 0x03;  // Subcmd (停止运动)
 
         Log.d(TAG, "Built stop exercise command");
         return command;
@@ -899,6 +931,7 @@ public class NotificationHandler {
 
         // 读取时间戳 (对齐Python: unix_ms = int.from_bytes(ppg_led_data[2:10], byteorder='little'))
         long frameTimestamp = readUInt64LE(data, 6);  // 偏移4字节帧头 + 2字节(seq+data_num)
+        Log.e("TAG",String.valueOf(frameTimestamp));
         result.append("Frame Time: ").append(formatTimestamp(frameTimestamp)).append("\n");
 
         // 处理实时数据点并更新图表 - 对齐Python逻辑
@@ -916,7 +949,6 @@ public class NotificationHandler {
                 break;
             }
         }
-
         result.append("Updated ").append(validPoints).append(" data points to charts");
         Log.d(TAG, "Processed " + validPoints + " realtime data points");
         return result.toString();
@@ -927,7 +959,6 @@ public class NotificationHandler {
      */
     private static boolean parseAndUpdateRealtimeDataPoint(byte[] data, int offset) {
         try {
-            // 对齐Python解析逻辑，使用小端序
             // PPG数据 (前12字节，每个4字节)
             long green = readUInt32LE(data, offset);
             long red = readUInt32LE(data, offset + 4);
@@ -952,6 +983,8 @@ public class NotificationHandler {
             updateRealtimeCharts(green, red, ir, accX, accY, accZ);
 
             Log.v(TAG, String.format("Realtime point: G:%d, R:%d, IR:%d, AccX:%d, AccY:%d, AccZ:%d, GyroX:%d, GyroY:%d, GyroZ:%d, T0:%d, T1:%d, T2:%d",
+                    green, red, ir, accX, accY, accZ, gyroX, gyroY, gyroZ, temp0, temp1, temp2));
+            recordLog(String.format("实时数据点: Green=%d, Red=%d, IR=%d, AccX=%d, AccY=%d, AccZ=%d, GyroX=%d, GyroY=%d, GyroZ=%d, Temp0=%d, Temp1=%d, Temp2=%d",
                     green, red, ir, accX, accY, accZ, gyroX, gyroY, gyroZ, temp0, temp1, temp2));
 
             return true;
@@ -1005,6 +1038,7 @@ public class NotificationHandler {
         }
 
         long frameTimestamp = readUInt64LE(data, 6);
+        Log.e("TAG",String.valueOf(frameTimestamp));
         result.append("Frame Time: ").append(formatTimestamp(frameTimestamp)).append("\n");
 
         // 处理数据点
@@ -1048,7 +1082,6 @@ public class NotificationHandler {
      */
     private static String formatTimestamp(long timestampMillis) {
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy.MM.dd.HH:mm:ss.SSS", Locale.getDefault());
-        sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
         return sdf.format(new Date(timestampMillis));
     }
 

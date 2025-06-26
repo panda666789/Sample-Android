@@ -12,6 +12,7 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -20,6 +21,8 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
+import androidx.core.widget.NestedScrollView;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -47,7 +50,7 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
     TextView deviceName;
     Button startBtn;
     ImageButton settingsBtn;
-    private LinearLayout infoLayout;
+    private NestedScrollView infoLayout;
     private boolean infoVisible = false;
     private TextView tvLog;
     Button connectBtn;
@@ -77,6 +80,7 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
     Button startExerciseBtn;
     Button stopExerciseBtn;
     TextView exerciseStatusText;
+    Button formatFileSystemBtn;  // 格式化文件系统按钮
 
     private BufferedWriter logWriter;
     private boolean isRecordingRing = false;  // 控制是否记录日志
@@ -104,7 +108,7 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
         public int fileSize;
         public int fileType;
         public String userId;
-        public long timestamp;
+        public String timestamp;
         public boolean isSelected = false;  // 新增：是否被选中
 
         public FileInfo(String fileName, int fileSize) {
@@ -114,11 +118,11 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
         }
 
         private void parseFileName() {
-            String[] parts = fileName.replace(".txt", "").split("_");
+            String[] parts = fileName.replace(".bin", "").split("_");
             if (parts.length >= 3) {
                 this.userId = parts[0];
-                this.timestamp = Long.parseLong(parts[1]);
-                this.fileType = Integer.parseInt(parts[2]);
+                this.timestamp =parts[1]+parts[2]+parts[3];
+                this.fileType = Integer.parseInt(parts[parts.length-1]);
             }
         }
 
@@ -146,14 +150,7 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
             }
         }
 
-        public String getFormattedTimestamp() {
-            try {
-                SimpleDateFormat sdf = new SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault());
-                return sdf.format(new Date(timestamp));
-            } catch (Exception e) {
-                return "时间解析错误";
-            }
-        }
+
     }
 
     // 文件列表适配器
@@ -171,16 +168,28 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
             LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT);
-            layoutParams.setMargins(0, 4, 0, 4); // 添加上下边距
+            layoutParams.setMargins(0, 4, 0, 4);
             layout.setLayoutParams(layoutParams);
             layout.setOrientation(LinearLayout.HORIZONTAL);
-            layout.setPadding(8, 8, 8, 8); // 增加内边距
-            layout.setMinimumHeight(48); // 设置最小高度，方便点击
+            layout.setPadding(8, 8, 8, 8);
+            layout.setMinimumHeight(60); // 增加最小高度，更容易点击
 
             // 设置背景和点击效果
             layout.setBackgroundResource(android.R.drawable.list_selector_background);
             layout.setClickable(true);
             layout.setFocusable(true);
+
+            // 关键修复：设置触摸事件处理
+            layout.setOnTouchListener(new View.OnTouchListener() {
+                @Override
+                public boolean onTouch(View v, MotionEvent event) {
+                    // 确保item可以接收触摸事件
+                    if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                        v.getParent().getParent().requestDisallowInterceptTouchEvent(true);
+                    }
+                    return false;
+                }
+            });
 
             // 选择框
             android.widget.CheckBox checkBox = new android.widget.CheckBox(parent.getContext());
@@ -216,7 +225,7 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
             fileDetails.setId(android.R.id.text2);
             fileDetails.setTextSize(10);
             fileDetails.setTextColor(Color.GRAY);
-            fileDetails.setMaxLines(1);
+            fileDetails.setMaxLines(2); // 允许两行显示更多信息
             fileDetails.setEllipsize(android.text.TextUtils.TruncateAt.END);
             LinearLayout.LayoutParams detailsParams = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -242,27 +251,32 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
             holder.fileDetails.setText(String.format("%s | %s | %s",
                     file.getFileTypeDescription(),
                     file.getFormattedSize(),
-                    file.getFormattedTimestamp()));
+                    file.timestamp));
 
-            // 设置整个item的点击事件
+            // 设置整个item的点击事件 - 优化版
             holder.itemView.setOnClickListener(v -> {
                 file.isSelected = !file.isSelected;
                 holder.checkBox.setChecked(file.isSelected);
                 updateSelectedFiles();
+
+                // 提供触觉反馈
+                v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+
+                recordLog(String.format("文件选择状态变更: %s -> %s",
+                        file.fileName, file.isSelected ? "选中" : "未选中"));
             });
 
-            // 设置checkbox的点击事件
-            holder.checkBox.setOnClickListener(v -> {
-                file.isSelected = holder.checkBox.isChecked();
-                updateSelectedFiles();
-            });
-
-            // 阻止checkbox的点击事件冒泡到parent
-            holder.checkBox.setOnCheckedChangeListener(null);
+            // 优化checkbox的事件处理
+            holder.checkBox.setOnCheckedChangeListener(null); // 先清除监听器
             holder.checkBox.setChecked(file.isSelected);
             holder.checkBox.setOnCheckedChangeListener((buttonView, isChecked) -> {
-                file.isSelected = isChecked;
-                updateSelectedFiles();
+                if (file.isSelected != isChecked) {
+                    file.isSelected = isChecked;
+                    updateSelectedFiles();
+
+                    recordLog(String.format("复选框状态变更: %s -> %s",
+                            file.fileName, isChecked ? "选中" : "未选中"));
+                }
             });
         }
 
@@ -285,6 +299,7 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
         }
     }
 
+
     // 更新选中文件列表
     private void updateSelectedFiles() {
         selectedFiles.clear();
@@ -296,7 +311,6 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
 
         // 更新下载按钮状态
         mainHandler.post(() -> {
-            downloadSelectedBtn.setEnabled(selectedFiles.size() > 0 && !isDownloadingFiles);
             downloadSelectedBtn.setText(String.format("下载选中 (%d)", selectedFiles.size()));
 
             fileListStatusText.setText(String.format("文件列表 (共%d个，已选%d个)",
@@ -349,10 +363,14 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
                     if (subcmd == 0x01) {
                         recordLog("识别为开始运动响应");
                         handleStartExerciseResponse(data);
-                    } else if (subcmd == 0x02) {
+                    } else if (subcmd == 0x03) {
                         recordLog("识别为结束运动响应");
                         handleStopExerciseResponse(data);
                     }
+                }
+                else if (cmd == 0x36 && subcmd == 0x13) {
+                    recordLog("识别为格式化文件系统响应");
+                    handleFormatFileSystemResponse(data);
                 }
             }
         } catch (Exception e) {
@@ -360,7 +378,76 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
             e.printStackTrace();
         }
     }
+    private void handleFormatFileSystemResponse(byte[] data) {
+        try {
+            if (data == null || data.length < 5) {
+                recordLog("格式化响应数据长度不足");
+                return;
+            }
 
+            int frameType = data[0] & 0xFF;
+            int frameId = data[1] & 0xFF;
+            int cmd = data[2] & 0xFF;
+            int subcmd = data[3] & 0xFF;
+            int result = data[4] & 0xFF;
+
+            recordLog("格式化文件系统响应解析:");
+            recordLog("  - Frame Type: 0x" + String.format("%02X", frameType));
+            recordLog("  - Frame ID: 0x" + String.format("%02X", frameId));
+            recordLog("  - Cmd: 0x" + String.format("%02X", cmd));
+            recordLog("  - Subcmd: 0x" + String.format("%02X", subcmd));
+            recordLog("  - Result: " + result + " (" + (result == 1 ? "成功" : "失败") + ")");
+
+            if (frameType != 0x00 || cmd != 0x36 || subcmd != 0x13) {
+                recordLog("格式化响应格式错误");
+                return;
+            }
+
+            boolean success = (result == 1);
+
+            recordLog("【格式化文件系统结果】: " + (success ? "✅ 成功" : "❌ 失败"));
+
+            mainHandler.post(() -> {
+                // 恢复按钮状态
+                formatFileSystemBtn.setText("格式化文件系统");
+                formatFileSystemBtn.setBackgroundColor(Color.parseColor("#FF5722"));
+
+                if (success) {
+                    // 格式化成功，清空文件列表
+                    fileList.clear();
+                    selectedFiles.clear();
+                    if (fileListAdapter != null) {
+                        fileListAdapter.notifyDataSetChanged();
+                    }
+                    updateSelectedFiles();
+
+                    Toast.makeText(itemView.getContext(),
+                            "✅ 文件系统格式化成功！\n所有文件已被清除",
+                            Toast.LENGTH_LONG).show();
+
+                    fileListStatusText.setText("文件列表 (已格式化，无文件)");
+
+                } else {
+                    Toast.makeText(itemView.getContext(),
+                            "❌ 文件系统格式化失败！\n请检查设备状态",
+                            Toast.LENGTH_LONG).show();
+                }
+            });
+
+        } catch (Exception e) {
+            recordLog("解析格式化响应失败: " + e.getMessage());
+            e.printStackTrace();
+
+            mainHandler.post(() -> {
+                formatFileSystemBtn.setText("格式化文件系统");
+                formatFileSystemBtn.setBackgroundColor(Color.parseColor("#FF5722"));
+
+                Toast.makeText(itemView.getContext(),
+                        "解析格式化响应失败: " + e.getMessage(),
+                        Toast.LENGTH_SHORT).show();
+            });
+        }
+    }
     public RingViewHolder(View itemView) {
         super(itemView);
 
@@ -393,6 +480,8 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
         startExerciseBtn = itemView.findViewById(R.id.btn_start_exercise);
         stopExerciseBtn = itemView.findViewById(R.id.btn_stop_exercise);
         exerciseStatusText = itemView.findViewById(R.id.text_exercise_status);
+        setupNotificationHandlerLogging();
+        formatFileSystemBtn = itemView.findViewById(R.id.formatFileSystemBtn);
 
         // 设置按钮事件
         connectBtn.setOnClickListener(v -> connectToDevice(itemView.getContext()));
@@ -421,7 +510,9 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
         if (stopExerciseBtn != null) {
             stopExerciseBtn.setOnClickListener(v -> stopExercise(itemView.getContext()));
         }
-
+        if (formatFileSystemBtn != null) {
+            formatFileSystemBtn.setOnClickListener(v -> formatFileSystem(itemView.getContext()));
+        }
         // 初始化文件列表
         initializeFileList();
         initializePlotViews(itemView);
@@ -429,22 +520,121 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
         setupDeviceCommandCallback();
         initializeUI();
     }
+    public void formatFileSystem(Context context) {
+        // 显示确认对话框
+        new android.app.AlertDialog.Builder(context)
+                .setTitle("⚠️ 格式化文件系统")
+                .setMessage("警告：此操作将永久删除戒指中的所有文件数据！\n\n确定要继续格式化吗？")
+                .setIcon(android.R.drawable.ic_dialog_alert)
+                .setPositiveButton("确认格式化", (dialog, which) -> {
+                    performFormatFileSystem(context);
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
 
+    /**
+     * 执行格式化文件系统操作
+     */
+    private void performFormatFileSystem(Context context) {
+        try {
+            recordLog("【开始格式化文件系统】使用自定义指令");
+
+            // 生成随机Frame ID
+            int frameId = generateRandomFrameId();
+
+            // 构建格式化指令: 00[FrameID]3613
+            String hexCommand = String.format("00%02X3613", frameId);
+            byte[] commandData = hexStringToByteArray(hexCommand);
+
+            recordLog("发送格式化指令: " + hexCommand);
+            recordLog("指令结构:");
+            recordLog("  - Frame Type: 0x00");
+            recordLog("  - Frame ID: 0x" + String.format("%02X", frameId));
+            recordLog("  - Cmd: 0x36 (文件操作)");
+            recordLog("  - Subcmd: 0x13 (格式化文件系统)");
+            recordLog("  - Data: 无");
+
+            // 更新按钮状态
+            formatFileSystemBtn.setText("格式化中...");
+            formatFileSystemBtn.setBackgroundColor(Color.GRAY);
+
+            // 发送指令
+            LmAPI.CUSTOMIZE_CMD(commandData, fileTransferCmdListener);
+
+            Toast.makeText(context, "格式化指令已发送，请等待响应", Toast.LENGTH_SHORT).show();
+
+        } catch (Exception e) {
+            recordLog("发送格式化指令失败: " + e.getMessage());
+            e.printStackTrace();
+
+            // 恢复按钮状态
+            mainHandler.post(() -> {
+                formatFileSystemBtn.setText("格式化文件系统");
+                formatFileSystemBtn.setBackgroundColor(Color.parseColor("#FF5722"));
+            });
+
+            Toast.makeText(context, "发送格式化指令失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
     // 初始化文件列表
     private void initializeFileList() {
         if (fileListRecyclerView != null) {
             fileListAdapter = new FileListAdapter(fileList);
 
             // 设置布局管理器
-            LinearLayoutManager layoutManager = new LinearLayoutManager(itemView.getContext());
+            LinearLayoutManager layoutManager = new LinearLayoutManager(itemView.getContext()) {
+                @Override
+                public boolean canScrollVertically() {
+                    // 重写此方法，确保内部RecyclerView可以垂直滚动
+                    return true;
+                }
+
+                @Override
+                public void onLayoutChildren(RecyclerView.Recycler recycler, RecyclerView.State state) {
+                    try {
+                        super.onLayoutChildren(recycler, state);
+                    } catch (IndexOutOfBoundsException e) {
+                        // 防止布局异常
+                        recordLog("RecyclerView布局异常，已处理: " + e.getMessage());
+                    }
+                }
+            };
             fileListRecyclerView.setLayoutManager(layoutManager);
 
             // 设置适配器
             fileListRecyclerView.setAdapter(fileListAdapter);
 
-            // 重要：禁用RecyclerView的嵌套滚动，让外层NestedScrollView处理滚动
+            // 关键修复：完全禁用嵌套滚动，让RecyclerView自己处理滚动
             fileListRecyclerView.setNestedScrollingEnabled(false);
-            fileListRecyclerView.setHasFixedSize(false);
+
+            // 设置固定高度，避免高度计算问题
+            fileListRecyclerView.setHasFixedSize(true);
+
+            // 设置触摸拦截，确保RecyclerView可以接收到触摸事件
+            fileListRecyclerView.setOnTouchListener(new View.OnTouchListener() {
+                @Override
+                public boolean onTouch(View v, MotionEvent event) {
+                    // 请求父容器不要拦截触摸事件
+                    if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                        v.getParent().requestDisallowInterceptTouchEvent(true);
+                    }
+                    return false;
+                }
+            });
+
+            // 添加滚动监听器来处理触摸事件拦截
+            fileListRecyclerView.addOnScrollListener(new RecyclerView.OnScrollListener() {
+                @Override
+                public void onScrollStateChanged(@NonNull RecyclerView recyclerView, int newState) {
+                    super.onScrollStateChanged(recyclerView, newState);
+
+                    // 在滚动时请求父容器不要拦截触摸事件
+                    if (newState == RecyclerView.SCROLL_STATE_DRAGGING) {
+                        recyclerView.getParent().requestDisallowInterceptTouchEvent(true);
+                    }
+                }
+            });
 
             // 添加分割线
             try {
@@ -455,12 +645,13 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
                 recordLog("添加分割线失败: " + e.getMessage());
             }
 
-            recordLog("文件列表RecyclerView初始化完成，滚动由NestedScrollView处理");
+            recordLog("文件列表RecyclerView初始化完成，已修复滚动冲突");
         } else {
             recordLog("警告：fileListRecyclerView为null");
         }
         updateSelectedFiles();
     }
+
 
     private void setupDeviceCommandCallback() {
         NotificationHandler.setDeviceCommandCallback(new NotificationHandler.DeviceCommandCallback() {
@@ -511,7 +702,6 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
         }
 
         if (stopExerciseBtn != null) {
-            stopExerciseBtn.setEnabled(false);
         }
 
         updateExerciseStatus("就绪");
@@ -636,7 +826,6 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
         isDownloadingFiles = true;
         currentDownloadIndex = 0;
         downloadSelectedBtn.setText("下载中...");
-        downloadSelectedBtn.setEnabled(false);
 
         recordLog(String.format("【开始批量下载】选中文件数: %d", selectedFiles.size()));
 
@@ -658,7 +847,6 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
             isDownloadingFiles = false;
             mainHandler.post(() -> {
                 downloadSelectedBtn.setText(String.format("下载选中 (%d)", selectedFiles.size()));
-                downloadSelectedBtn.setEnabled(true);
 
                 recordLog("【批量下载完成】所有选中文件已下载");
                 Toast.makeText(context, "所有选中文件下载完成", Toast.LENGTH_LONG).show();
@@ -696,7 +884,6 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
                 }
                 updateSelectedFiles();
                 requestFileListBtn.setText("获取中...");
-                requestFileListBtn.setEnabled(false);
             });
 
         } catch (Exception e) {
@@ -751,7 +938,6 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
                 recordLog("设备中没有文件");
                 mainHandler.post(() -> {
                     requestFileListBtn.setText("获取文件列表");
-                    requestFileListBtn.setEnabled(true);
                     fileListStatusText.setText("文件列表 (设备中无文件)");
                 });
                 return;
@@ -841,7 +1027,6 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
                 }
                 updateSelectedFiles();
                 requestFileListBtn.setText("获取文件列表");
-                requestFileListBtn.setEnabled(true);
             });
 
             // 检查是否需要继续获取更多文件 (对齐Python的分页逻辑)
@@ -872,7 +1057,6 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
             // 恢复UI状态
             mainHandler.post(() -> {
                 requestFileListBtn.setText("获取文件列表");
-                requestFileListBtn.setEnabled(true);
                 fileListStatusText.setText("文件列表解析失败");
             });
         }
@@ -961,11 +1145,9 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
             if (success) {
                 recordLog("【开始主动测量】时间: " + measurementTime + "秒");
                 startMeasurementBtn.setText("测量中...");
-                startMeasurementBtn.setEnabled(false);
 
                 mainHandler.postDelayed(() -> {
                     startMeasurementBtn.setText("开始测量");
-                    startMeasurementBtn.setEnabled(true);
                 }, measurementTime * 1000 + 2000);
 
             } else {
@@ -1010,8 +1192,7 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
             if (success) {
                 recordLog(String.format("【开始运动】总时长: %d秒, 片段: %d秒", totalDuration, segmentDuration));
 
-                startExerciseBtn.setEnabled(false);
-                stopExerciseBtn.setEnabled(true);
+
                 updateExerciseStatus(String.format("运动中 - 总时长: %d分钟, 片段: %d分钟",
                         totalDuration/60, segmentDuration/60));
 
@@ -1034,8 +1215,7 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
             if (success) {
                 recordLog("【结束运动】用户手动停止");
 
-                startExerciseBtn.setEnabled(true);
-                stopExerciseBtn.setEnabled(false);
+
                 updateExerciseStatus("已停止");
 
                 Toast.makeText(context, "运动已停止", Toast.LENGTH_SHORT).show();
@@ -1056,7 +1236,19 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
     }
 
     // ==================== 时间同步功能 ====================
+    private void setupNotificationHandlerLogging() {
+        // 将当前RingViewHolder的recordLog方法连接到NotificationHandler
+        NotificationHandler.setLogRecorder(new NotificationHandler.LogRecorder() {
+            @Override
+            public void recordLog(String message) {
+                // 调用RingViewHolder的recordLog方法
+                RingViewHolder.this.recordLog(message);
+            }
+        });
 
+        recordLog("✅ NotificationHandler日志记录已连接到RingViewHolder");
+        recordLog("现在NotificationHandler的所有操作都会记录到当前会话日志中");
+    }
     public void updateRingTime(Context context) {
         if (isTimeUpdating) {
             Toast.makeText(context, "时间更新正在进行中，请等待", Toast.LENGTH_SHORT).show();
@@ -1093,7 +1285,6 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
             recordLog("发送时间更新命令: " + hexCommand.toString());
 
             timeUpdateBtn.setText("更新中...");
-            timeUpdateBtn.setEnabled(false);
 
             LmAPI.CUSTOMIZE_CMD(data, fileTransferCmdListener);
 
@@ -1103,7 +1294,6 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
 
             mainHandler.post(() -> {
                 timeUpdateBtn.setText("更新时间");
-                timeUpdateBtn.setEnabled(true);
             });
             isTimeUpdating = false;
         }
@@ -1122,7 +1312,6 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
 
             recordLog("【开始时间校准同步】使用自定义指令");
             recordLog("主机发送时间: " + timeSyncRequestTime + " ms");
-
             StringBuilder hexCommand = new StringBuilder();
             hexCommand.append(String.format("00%02X1002", timeSyncFrameId));
 
@@ -1135,7 +1324,7 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
             recordLog("发送时间校准命令: " + hexCommand.toString());
 
             timeSyncBtn.setText("校准中...");
-            timeSyncBtn.setEnabled(false);
+            timeSyncRequestTime = timeSyncRequestTime/1000;
 
             LmAPI.CUSTOMIZE_CMD(data, fileTransferCmdListener);
 
@@ -1145,7 +1334,6 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
 
             mainHandler.post(() -> {
                 timeSyncBtn.setText("时间校准");
-                timeSyncBtn.setEnabled(true);
             });
             isTimeSyncing = false;
         }
@@ -1341,8 +1529,9 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
             if (!directory.exists()) {
                 directory.mkdirs();
             }
+            String safeFileName = fileInfo.fileName.replace(":", "_");
 
-            File file = new File(directory, fileInfo.fileName);
+            File file = new File(directory, safeFileName);
             boolean append = currentPacket > 1;
 
             try (FileWriter fileWriter = new FileWriter(file, append);
@@ -1353,7 +1542,7 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
                     writer.write("# 文件名: " + fileInfo.fileName + "\n");
                     writer.write("# 文件类型: " + fileInfo.getFileTypeDescription() + "\n");
                     writer.write("# 用户ID: " + fileInfo.userId + "\n");
-                    writer.write("# 时间戳: " + fileInfo.timestamp + "\n");
+                    writer.write("# 时间: " + fileInfo.timestamp + "\n");
                     writer.write("# 下载时间: " + getCurrentTimestamp() + "\n");
                     writer.write("# 总包数: " + totalPackets + "\n");
                     writer.write("# ================================\n\n");
@@ -1454,7 +1643,6 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
 
             mainHandler.post(() -> {
                 timeUpdateBtn.setText("更新时间");
-                timeUpdateBtn.setEnabled(true);
                 Toast.makeText(itemView.getContext(), "戒指时间更新成功", Toast.LENGTH_SHORT).show();
             });
 
@@ -1464,7 +1652,6 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
 
             mainHandler.post(() -> {
                 timeUpdateBtn.setText("更新时间");
-                timeUpdateBtn.setEnabled(true);
             });
         } finally {
             isTimeUpdating = false;
@@ -1473,6 +1660,8 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
 
     private void handleTimeSyncResponse(byte[] data) {
         try {
+            long currentTime = System.currentTimeMillis()/1000;
+
             if (data == null || data.length < 28) {
                 recordLog("时间校准响应数据长度不足");
                 return;
@@ -1494,40 +1683,38 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
             }
 
             int offset = 4;
-            long hostSentTime = readUInt64LE(data, offset);
+            long hostSentTime = readUInt64LE(data, offset)/1000;
             offset += 8;
-            long ringReceivedTime = readUInt64LE(data, offset);
+            long ringReceivedTime = readUInt64LE(data, offset)/1000;
             offset += 8;
-            long ringUploadTime = readUInt64LE(data, offset);
+            long ringUploadTime = readUInt64LE(data, offset)/1000;
 
-            long currentTime = System.currentTimeMillis();
             long roundTripTime = currentTime - timeSyncRequestTime;
             long oneWayDelay = roundTripTime / 2;
             long timeDifference = ringReceivedTime - hostSentTime;
 
             recordLog("【时间校准结果】");
-            recordLog(String.format("主机发送时间: %d ms", hostSentTime));
-            recordLog(String.format("戒指接收时间: %d ms", ringReceivedTime));
-            recordLog(String.format("戒指上传时间: %d ms", ringUploadTime));
-            recordLog(String.format("往返延迟: %d ms", roundTripTime));
-            recordLog(String.format("单程延迟估计: %d ms", oneWayDelay));
-            recordLog(String.format("时间差: %d ms", timeDifference));
+            recordLog(String.format("主机发送时间: %d ", hostSentTime));
+            recordLog(String.format("戒指接收时间: %d ", ringReceivedTime));
+            recordLog(String.format("戒指上传时间: %d ", ringUploadTime));
+            recordLog(String.format("往返延迟: %d s", roundTripTime));
+            recordLog(String.format("单程延迟估计: %d s", oneWayDelay));
+            recordLog(String.format("时间差: %d s", timeDifference));
 
-            String quality;
-            if (Math.abs(timeDifference) < 50) {
-                quality = "✓ 时间同步良好 (差值 < 50ms)";
-            } else if (Math.abs(timeDifference) < 200) {
-                quality = "⚠ 时间同步一般 (差值 < 200ms)";
-            } else {
-                quality = "✗ 时间同步较差 (差值 >= 200ms)";
-            }
-            recordLog(quality);
+//            String quality;
+//            if (Math.abs(timeDifference) < 50) {
+//                quality = "✓ 时间同步良好 (差值 < 50ms)";
+//            } else if (Math.abs(timeDifference) < 200) {
+//                quality = "⚠ 时间同步一般 (差值 < 200ms)";
+//            } else {
+//                quality = "✗ 时间同步较差 (差值 >= 200ms)";
+//            }
+//            recordLog(quality);
 
             mainHandler.post(() -> {
                 timeSyncBtn.setText("时间校准");
-                timeSyncBtn.setEnabled(true);
                 Toast.makeText(itemView.getContext(),
-                        String.format("时间校准完成\n时间差: %d ms\n延迟: %d ms", timeDifference, roundTripTime),
+                        String.format("时间校准完成\n时间差: %d s\n延迟: %d s", timeDifference, roundTripTime),
                         Toast.LENGTH_LONG).show();
             });
 
@@ -1537,7 +1724,6 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
 
             mainHandler.post(() -> {
                 timeSyncBtn.setText("时间校准");
-                timeSyncBtn.setEnabled(true);
             });
         } finally {
             isTimeSyncing = false;
@@ -1572,8 +1758,6 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
                 recordLog("结束运动响应 Frame ID: 0x" + String.format("%02X", frameId));
 
                 mainHandler.post(() -> {
-                    startExerciseBtn.setEnabled(true);
-                    stopExerciseBtn.setEnabled(false);
                     updateExerciseStatus("运动已结束");
                     Toast.makeText(itemView.getContext(), "运动结束指令发送成功", Toast.LENGTH_SHORT).show();
                 });
