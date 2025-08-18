@@ -68,6 +68,7 @@ public class CameraHelper {
                     cameraIdFront = cameraId;
                 } else if (facing == CameraCharacteristics.LENS_FACING_BACK) {
                     cameraIdBack = cameraId;
+
                 }
             }
         } catch (CameraAccessException e) {
@@ -80,18 +81,32 @@ public class CameraHelper {
         @Override
         public void surfaceCreated(SurfaceHolder holder) {
             openCamera(cameraIdFront, true);
+
         }
         public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {}
-        public void surfaceDestroyed(SurfaceHolder holder) {}
+        public void surfaceDestroyed(SurfaceHolder holder) {
+            if (cameraDeviceFront != null) {
+                cameraDeviceFront.close();
+                cameraDeviceFront = null;
+                frontPreviewReady = false;
+            }
+        }
     };
 
     private final SurfaceHolder.Callback surfaceCallbackBack = new SurfaceHolder.Callback() {
         @Override
         public void surfaceCreated(SurfaceHolder holder) {
             openCamera(cameraIdBack, false);
+
         }
         public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {}
-        public void surfaceDestroyed(SurfaceHolder holder) {}
+        public void surfaceDestroyed(SurfaceHolder holder) {
+            if (cameraDeviceBack != null) {
+                cameraDeviceBack.close();
+                cameraDeviceBack = null;
+                backPreviewReady = false;
+            }
+        }
     };
     // endregion
 
@@ -109,8 +124,27 @@ public class CameraHelper {
                         startPreview(cameraDeviceBack, surfaceViewBack.getHolder().getSurface(), false);
                     }
                 }
-                public void onDisconnected(@NonNull CameraDevice camera) { camera.close(); }
-                public void onError(@NonNull CameraDevice camera, int error) { camera.close(); }
+                public void onDisconnected(@NonNull CameraDevice camera) {
+                    camera.close();
+                    if (isFront) {
+                        cameraDeviceFront = null;
+                        frontPreviewReady = false;
+                    } else {
+                        cameraDeviceBack = null;
+                        backPreviewReady = false;
+                    }
+                }
+                public void onError(@NonNull CameraDevice camera, int error) {
+                    camera.close();
+                    if (isFront) {
+                        cameraDeviceFront = null;
+                        frontPreviewReady = false;
+                    } else {
+                        cameraDeviceBack = null;
+                        backPreviewReady = false;
+                    }
+                    Log.e(TAG, "Camera error: " + error + " for " + (isFront ? "front" : "back") + " camera");
+                }
             }, null);
         } catch (CameraAccessException e) {
             e.printStackTrace();
@@ -129,9 +163,11 @@ public class CameraHelper {
                         if (isFront) {
                             captureSessionFront = session;
                             frontPreviewReady = true;
+                            Log.d(TAG, "Front camera preview ready");
                         } else {
                             captureSessionBack = session;
                             backPreviewReady = true;
+                            Log.d(TAG, "Back camera preview ready");
                         }
                     } catch (CameraAccessException e) {
                         e.printStackTrace();
@@ -140,44 +176,98 @@ public class CameraHelper {
 
                 public void onConfigureFailed(@NonNull CameraCaptureSession session) {
                     Log.e(TAG, "Preview config failed: " + (isFront ? "Front" : "Back"));
+                    if (isFront) {
+                        frontPreviewReady = false;
+                    } else {
+                        backPreviewReady = false;
+                    }
                 }
             }, null);
-        } catch (CameraAccessException e) { e.printStackTrace(); }
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+            if (isFront) {
+                frontPreviewReady = false;
+            } else {
+                backPreviewReady = false;
+            }
+        }
     }
 
     // region 录像控制
 
     public void startFrontRecording() {
-        recorderHelperFront.setupFrontRecording();
-        isRecordingFront = true;
+        Log.d(TAG, "Attempting to start front recording...");
+        if (cameraDeviceFront == null) {
+            Log.e(TAG, "Front camera device is null");
+            throw new IllegalStateException("Front camera device not initialized");
+        }
+        if (surfaceViewFront == null) {
+            Log.e(TAG, "Front surface view is null");
+            throw new IllegalStateException("Front surface view not initialized");
+        }
+
+        try {
+            recorderHelperFront.setupFrontRecording();
+            isRecordingFront = true;
+            Log.d(TAG, "Front recording started successfully");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to start front recording", e);
+            throw e;
+        }
     }
 
-
     public void startBackRecording() {
-        recorderHelperBack.setupBackRecording();   // ↙︎ 会重新 createCaptureSession
-        isRecordingBack = true;
+        Log.d(TAG, "Attempting to start back recording...");
+        if (cameraDeviceBack == null) {
+            Log.e(TAG, "Back camera device is null");
+            throw new IllegalStateException("Back camera device not initialized");
+        }
+        if (surfaceViewBack == null) {
+            Log.e(TAG, "Back surface view is null");
+            throw new IllegalStateException("Back surface view not initialized");
+        }
+
+        try {
+            recorderHelperBack.setupBackRecording();
+            isRecordingBack = true;
+            Log.d(TAG, "Back recording started successfully");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to start back recording", e);
+            throw e;
+        }
     }
 
     public void stopFrontRecording() {
         if (!isRecordingFront || recorderHelperFront == null) return;
         recorderHelperFront.stopFrontRecording();
-        startPreview(cameraDeviceFront, surfaceViewFront.getHolder().getSurface(), true);
+        if (surfaceViewFront != null && cameraDeviceFront != null) {
+            startPreview(cameraDeviceFront, surfaceViewFront.getHolder().getSurface(), true);
+        }
         isRecordingFront = false;
+        Log.d(TAG, "Front recording stopped");
     }
 
     public void stopBackRecording() {
         if (!isRecordingBack || recorderHelperBack == null) return;
         recorderHelperBack.stopBackRecording();
-        startPreview(cameraDeviceBack, surfaceViewBack.getHolder().getSurface(), false);
-
+        if (surfaceViewBack != null && cameraDeviceBack != null) {
+            startPreview(cameraDeviceBack, surfaceViewBack.getHolder().getSurface(), false);
+        }
         isRecordingBack = false;
+        Log.d(TAG, "Back recording stopped");
     }
+
     public boolean isFrontCameraReady() {
         return frontPreviewReady && cameraDeviceFront != null && surfaceViewFront != null;
     }
 
+    public boolean isBackCameraReady() {
+        return backPreviewReady && cameraDeviceBack != null && surfaceViewBack != null;
+    }
+
     public boolean isFrontRecording() { return isRecordingFront; }
     public boolean isBackRecording() { return isRecordingBack; }
+
     public void setCaptureSessionFront(CameraCaptureSession session) {
         this.captureSessionFront = session;
     }
@@ -201,4 +291,20 @@ public class CameraHelper {
     public CameraDevice getCameraDeviceBack() { return cameraDeviceBack; }
     public SurfaceView getSurfaceViewFront() { return surfaceViewFront; }
     public SurfaceView getSurfaceViewBack() { return surfaceViewBack; }
+
+    // 释放资源
+    public void release() {
+        if (cameraDeviceFront != null) {
+            cameraDeviceFront.close();
+            cameraDeviceFront = null;
+        }
+        if (cameraDeviceBack != null) {
+            cameraDeviceBack.close();
+            cameraDeviceBack = null;
+        }
+        frontPreviewReady = false;
+        backPreviewReady = false;
+        isRecordingFront = false;
+        isRecordingBack = false;
+    }
 }

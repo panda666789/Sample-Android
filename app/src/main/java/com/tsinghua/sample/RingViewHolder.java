@@ -6,6 +6,7 @@ import static com.tsinghua.sample.MainActivity.hexStringToByteArray;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.os.Environment;
@@ -29,8 +30,11 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.lm.sdk.LmAPI;
 import com.lm.sdk.LogicalApi;
 import com.lm.sdk.inter.ICustomizeCmdListener;
+import com.lm.sdk.utils.AppUtils;
 import com.lm.sdk.utils.BLEUtils;
+import com.lm.sdk.utils.GlobalParameterUtils;
 import com.tsinghua.sample.activity.ListActivity;
+import com.tsinghua.sample.utils.BLEService;
 import com.tsinghua.sample.utils.NotificationHandler;
 
 import java.io.BufferedWriter;
@@ -1268,8 +1272,8 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
             }
 
             int measurementTime = Integer.parseInt(timeStr);
-            if (measurementTime < 1 || measurementTime > 3600) {
-                Toast.makeText(context, "测量时间应在1-3600秒之间", Toast.LENGTH_SHORT).show();
+            if (measurementTime < 0 || measurementTime > 255) {
+                Toast.makeText(context, "测量时间应在1-255秒之间", Toast.LENGTH_SHORT).show();
                 return;
             }
 
@@ -1284,7 +1288,6 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
 
                 Toast.makeText(context, "测量开始，可随时点击'停止采集'结束", Toast.LENGTH_SHORT).show();
 
-                // 注意：不再设置自动停止的延时任务，让用户手动控制
 
             } else {
                 Toast.makeText(context, "开始测量失败", Toast.LENGTH_SHORT).show();
@@ -1656,28 +1659,6 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
                         break;
                     }
 
-                    long green = readUInt32LE(data, dataOffset);
-                    long red = readUInt32LE(data, dataOffset + 4);
-                    long ir = readUInt32LE(data, dataOffset + 8);
-                    short accX = readInt16LE(data, dataOffset + 12);
-                    short accY = readInt16LE(data, dataOffset + 14);
-                    short accZ = readInt16LE(data, dataOffset + 16);
-                    short gyroX = readInt16LE(data, dataOffset + 18);
-                    short gyroY = readInt16LE(data, dataOffset + 20);
-                    short gyroZ = readInt16LE(data, dataOffset + 22);
-                    short temper0 = readInt16LE(data, dataOffset + 24);
-                    short temper1 = readInt16LE(data, dataOffset + 26);
-                    short temper2 = readInt16LE(data, dataOffset + 28);
-
-                    updatePlotViews(green, red, ir, accX, accY, accZ);
-
-                    String logMsg = String.format("green:%d red:%d ir:%d " +
-                                    "acc_x:%d acc_y:%d acc_z:%d " +
-                                    "gyro_x:%d gyro_y:%d gyro_z:%d " +
-                                    "temper0:%d temper1:%d temper2:%d",
-                            green, red, ir, accX, accY, accZ, gyroX, gyroY, gyroZ, temper0, temper1, temper2);
-
-                    recordLog(logMsg);
                 }
 
                 // 保存文件数据到固定位置
@@ -2029,8 +2010,8 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
     }
 
     private String formatTimestamp(long timestampMillis) {
-        java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.getDefault());
-        return sdf.format(new java.util.Date(timestampMillis));
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault());
+        return sdf.format(new Date(timestampMillis));
     }
 
     private void updatePlotViews(long green, long red, long ir, short accX, short accY, short accZ) {
@@ -2093,7 +2074,22 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
 
         BluetoothDevice device = BluetoothAdapter.getDefaultAdapter().getRemoteDevice(macAddress);
         if (device != null) {
-            BLEUtils.connectLockByBLE(context, device);
+            GlobalParameterUtils.getInstance().setDevice(device);
+            BluetoothAdapter mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+            if (mBluetoothAdapter != null) {
+                if (mBluetoothAdapter.isEnabled()) {
+                    if (device != null) {
+                        Intent mBleService = new Intent(context, BLEService.class);
+                        mBleService.putExtra("CONNECT_DEVICE", device);
+                        mBleService.putExtra("BLUETOOTH_HID_MODE", false);
+                        if (context != null && AppUtils.isAppOnForeground(context)) {
+                            context.startService(mBleService);
+                        }
+                    }
+                } else {
+                    mBluetoothAdapter.enable();
+                }
+            }
             recordLog("【连接蓝牙设备】MAC: " + macAddress);
         } else {
             Toast.makeText(context, "Invalid MAC address", Toast.LENGTH_SHORT).show();

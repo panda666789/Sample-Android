@@ -1,4 +1,6 @@
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.cardview.widget.CardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:padding="12dp"
@@ -6,54 +8,49 @@
     android:background="@android:color/white"
     android:elevation="2dp">
 
-    <!-- 顶部信息区域 -->
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal">
-
-        <TextView
-            android:id="@+id/deviceName"
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="wrap_content"
-            android:text="前置录制"
-            android:textSize="18sp"
-            android:textColor="#000"/>
-
-        <Button
-            android:id="@+id/startBtn"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="开始" />
-
-        <ImageButton
-            android:id="@+id/settingsBtn"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:src="@android:drawable/ic_menu_manage"
-            android:contentDescription="设置" />
-    </LinearLayout>
-
-    <!-- 展开摄像头预览的 info 区域 -->
-    <LinearLayout
-        android:id="@+id/infoLayout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="8dp"
-        android:visibility="gone"
-        android:background="#EFEFEF">
+        android:padding="16dp">
 
-        <SurfaceView
-            android:id="@+id/surfaceView"
+        <!-- 设备头部信息 -->
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="200dp"
-            android:layout_marginTop="8dp" />
-        <com.tsinghua.sample.utils.PlotView
-            android:id="@+id/plotView"
-            android:layout_width="match_parent"
-            android:layout_height="75dp"
-             />
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/deviceName"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="前置录制"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="@android:color/black" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/startBtn"
+                style="@style/Widget.MaterialComponents.Button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="开始" />
+
+            <ImageButton
+                android:id="@+id/settingsBtn"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="设置"
+                android:src="@android:drawable/ic_menu_preferences" />
+
+        </LinearLayout>
+
+
+
     </LinearLayout>
-</LinearLayout>
+
+</androidx.cardview.widget.CardView>
