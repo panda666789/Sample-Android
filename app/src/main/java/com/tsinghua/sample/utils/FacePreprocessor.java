@@ -45,6 +45,10 @@ public class FacePreprocessor {
 
     private final HeartRateEstimator heartRateEstimator;
     private final HeartRateViewModel heartRateViewModel;
+
+    // 视频质量评估器
+    private final VideoQualityEvaluator qualityEvaluator = new VideoQualityEvaluator();
+    private RectF lastValidBounds = null;  // 用于计算亮度的边界框缓存
     public interface OnDetectionFailListener {
         void onTooManyInvalidFrames();  // 连续无效帧触发回调
     }
@@ -52,6 +56,28 @@ public class FacePreprocessor {
 
     public void setOnDetectionFailListener(OnDetectionFailListener listener) {
         this.detectionFailListener = listener;
+    }
+
+    /**
+     * 重置质量评估器（录制开始时调用）
+     */
+    public void resetQualityEvaluator() {
+        qualityEvaluator.reset();
+        lastValidBounds = null;
+    }
+
+    /**
+     * 获取视频质量评估结果（录制结束时调用）
+     */
+    public VideoQualityEvaluator.QualityResult evaluateQuality() {
+        return qualityEvaluator.evaluate();
+    }
+
+    /**
+     * 获取质量评估器实例（用于实时监控）
+     */
+    public VideoQualityEvaluator getQualityEvaluator() {
+        return qualityEvaluator;
     }
 
     public FacePreprocessor(Context context, HeartRateEstimator estimator) {
@@ -97,6 +123,7 @@ public class FacePreprocessor {
             float[][][][] afterPreprocess = new float[1][36][36][3];
             RectF box = new RectF(-100, -100, -100, -100);
             Rect box_ = new Rect(-100, -100, -100, -100);
+            boolean bitmapRecycled = false;  // 标记bitmap是否已回收
             try {
 
                 if (result != null) {
@@ -104,6 +131,8 @@ public class FacePreprocessor {
                     if (result != null && !result.multiFaceLandmarks().isEmpty()) {
                         List<LandmarkProto.NormalizedLandmark> landmarks = result.multiFaceLandmarks().get(0).getLandmarkList();
                         RectF bounds = calculateBoundingBox(landmarks);
+                        // 保存归一化边界框用于质量评估
+                        lastValidBounds = bounds;
 
                         if (box.left < -1) {
                             box = bounds;
@@ -125,6 +154,7 @@ public class FacePreprocessor {
                         Mat mat = new Mat();
                         Utils.bitmapToMat(bitmap, mat);
                         bitmap.recycle();
+                        bitmapRecycled = true;  // 标记已回收
 
                         Imgproc.cvtColor(mat, mat, Imgproc.COLOR_RGBA2RGB);
                         Core.rotate(mat, mat, Core.ROTATE_90_COUNTERCLOCKWISE);
@@ -153,6 +183,8 @@ public class FacePreprocessor {
                 if (isAllZero(currentFrame)) {
                     invalidFrameCount++;
                     Log.w(TAG, "第 " + invalidFrameCount + " 帧无效（无人脸）");
+                    // 质量评估：无人脸帧
+                    qualityEvaluator.updateFrame(false, null);
                     if (invalidFrameCount >= MAX_INVALID_FRAMES) {
                         invalidFrameCount = 0;  // 重置防止重复触发
                         new Handler(context.getMainLooper()).post(() -> {
@@ -165,13 +197,18 @@ public class FacePreprocessor {
                 } else {
                     // ✅ 检测到了人脸，重置计数器
                     invalidFrameCount = 0;
+                    // 质量评估：有人脸帧，传入归一化边界框
+                    qualityEvaluator.updateFrame(true, lastValidBounds);
                 }
                 heartRateEstimator.estimateFromFrame(currentFrame,nowMs);
 
             } catch (Exception e) {
                 e.printStackTrace();
             } finally {
-
+                // 确保bitmap被回收（防止内存泄漏）
+                if (!bitmapRecycled && bitmap != null && !bitmap.isRecycled()) {
+                    bitmap.recycle();
+                }
             }
 
     }

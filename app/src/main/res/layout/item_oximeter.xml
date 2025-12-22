@@ -153,6 +153,29 @@
 
             </LinearLayout>
 
+            <!-- BVP波形显示区域 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="脉搏波形 (BVP)"
+                    android:textSize="12sp"
+                    android:textColor="#888888"
+                    android:layout_marginBottom="4dp" />
+
+                <com.tsinghua.sample.PlotView
+                    android:id="@+id/bvpWaveView"
+                    android:layout_width="match_parent"
+                    android:layout_height="100dp"
+                    android:background="#1A1E88E5" />
+
+            </LinearLayout>
+
             <!-- 调试日志区域 -->
             <TextView
                 android:id="@+id/debugLogText"

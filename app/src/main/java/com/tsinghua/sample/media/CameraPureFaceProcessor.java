@@ -38,6 +38,7 @@ import com.tsinghua.sample.core.SessionManager;
 import com.tsinghua.sample.utils.FacePreprocessor;
 import com.tsinghua.sample.utils.HeartRateEstimator;
 import com.tsinghua.sample.utils.PlotView;
+import com.tsinghua.sample.utils.VideoQualityEvaluator;
 
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
@@ -104,15 +105,41 @@ public class CameraPureFaceProcessor {
     private long recordingStartTimeNs = 0;  // 录制开始时间（纳秒）
     private static final int FRAME_RATE = 30;
     private static final int I_FRAME_INTERVAL = 1;
-    private static final int VIDEO_WIDTH = 480;  // 旋转后的宽度
-    private static final int VIDEO_HEIGHT = 640; // 旋转后的高度
+    private static final int VIDEO_WIDTH = 640;  // 相机原生宽度（不旋转）
+    private static final int VIDEO_HEIGHT = 480; // 相机原生高度（不旋转）
     private final Object encoderLock = new Object();
 
     // 帧计数统计（用于调试）
     private int encodedFrameCount = 0;
     private int droppedFrameCount = 0;
-    // 视频编码线程池（异步编码，避免阻塞相机回调）
-    private final ExecutorService videoEncoderExecutor = Executors.newSingleThreadExecutor();
+
+    // 视频编码线程池（使用有界队列，防止内存堆积）
+    // 编码线程优先级在首次执行任务时设置
+    private final java.util.concurrent.ArrayBlockingQueue<Runnable> encoderQueue =
+            new java.util.concurrent.ArrayBlockingQueue<>(10);  // 增加到10帧缓存
+    private volatile boolean encoderPrioritySet = false;  // 标记是否已设置编码线程优先级
+    private final ExecutorService videoEncoderExecutor = new java.util.concurrent.ThreadPoolExecutor(
+            1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
+            encoderQueue,
+            r -> {
+                Thread t = new Thread(r, "VideoEncoderThread");
+                t.setPriority(Thread.MAX_PRIORITY);  // Java线程优先级
+                return t;
+            },
+            new java.util.concurrent.ThreadPoolExecutor.DiscardPolicy()  // 队列满时直接丢弃
+    );
+
+    // NV12 缓冲区复用（避免频繁 GC）
+    private byte[] nv12Buffer = null;
+
+    // AI处理帧率控制（每N帧处理一次AI，减少CPU负载）
+    private static final int AI_PROCESS_INTERVAL = 5;  // 每5帧处理1次AI
+    private int frameIndex = 0;
+
+    // AI处理同步控制（防止回调堆积）
+    private volatile Bitmap pendingBitmap = null;  // 待处理的bitmap
+    private final Object bitmapLock = new Object();
+    private volatile boolean isAIProcessing = false;  // 是否正在处理AI
     private com.tsinghua.sample.utils.PlotView plotView;
     public interface CameraFaceProcessorCallback {
         void onCameraStarted();
@@ -121,6 +148,14 @@ public class CameraPureFaceProcessor {
         void onFaceDetected(Bitmap faceBitmap);
         void onFaceProcessingResult(Object result); // Replace Object with your specific result type
     }
+
+    /**
+     * 视频质量评估回调
+     */
+    public interface OnQualityResultListener {
+        void onQualityResult(VideoQualityEvaluator.QualityResult result);
+    }
+    private OnQualityResultListener qualityResultListener;
 
     /**
      * 初始化完成回调
@@ -195,6 +230,31 @@ public class CameraPureFaceProcessor {
                 callback.onError("Face mesh error: " + message);
             }
         });
+
+        // 只设置一次 ResultListener（避免每帧重复设置导致回调堆积）
+        faceMesh.setResultListener(result -> {
+            Bitmap bitmapToProcess = null;
+            synchronized (bitmapLock) {
+                if (pendingBitmap != null) {
+                    bitmapToProcess = pendingBitmap;
+                    pendingBitmap = null;  // 取出后清空
+                }
+            }
+
+            if (bitmapToProcess != null && isCameraRunning && facePreProcessor != null) {
+                try {
+                    facePreProcessor.addFrameResults(result, bitmapToProcess);
+                    // 注意：bitmapToProcess 传给 facePreProcessor 后由其负责回收
+                } catch (Exception e) {
+                    Log.e(TAG, "FaceMesh result处理异常", e);
+                    bitmapToProcess.recycle();  // 异常时回收
+                }
+            } else if (bitmapToProcess != null) {
+                bitmapToProcess.recycle();  // 不需要处理时回收
+            }
+
+            isAIProcessing = false;  // 标记处理完成
+        });
     }
 
     private void setupImageReader(int width, int height) {
@@ -214,6 +274,16 @@ public class CameraPureFaceProcessor {
      */
     private void setupVideoEncoder() {
         try {
+            // 先释放可能存在的旧编码器（防止资源泄漏）
+            synchronized (encoderLock) {
+                if (mediaCodec != null || mediaMuxer != null) {
+                    Log.w(TAG, "setupVideoEncoder: 发现未释放的旧编码器，先释放");
+                    releaseVideoEncoderInternal();
+                }
+                // 重置编码线程优先级标记（确保新录制时重新设置）
+                encoderPrioritySet = false;
+            }
+
             SharedPreferences prefs = activity.getSharedPreferences("AppSettings", Context.MODE_PRIVATE);
             String experimentId = prefs.getString("experiment_id", "default");
             SessionManager sm = SessionManager.getInstance();
@@ -247,6 +317,9 @@ public class CameraPureFaceProcessor {
 
                 // 创建 Muxer
                 mediaMuxer = new MediaMuxer(currentVideoPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+                // 设置视频旋转角度（前置摄像头需要270度旋转）
+                // 这样播放器会自动旋转视频，而不需要在编码时旋转
+                mediaMuxer.setOrientationHint(270);
                 videoTrackIndex = -1;
                 muxerStarted = false;
                 recordingStartTimeNs = System.nanoTime();  // 记录开始时间
@@ -263,43 +336,59 @@ public class CameraPureFaceProcessor {
     }
 
     /**
-     * 释放 MediaCodec + MediaMuxer 资源
+     * 释放 MediaCodec + MediaMuxer 资源（异步执行，避免阻塞主线程）
      */
     private void releaseVideoEncoder() {
         Log.d(TAG, "releaseVideoEncoder called, isRecording=" + isRecording);
         Log.d(TAG, "录制统计 - 总编码帧数: " + encodedFrameCount + ", 丢帧数: " + droppedFrameCount);
+
+        // 先标记停止录制，防止新帧进入
         synchronized (encoderLock) {
             isRecording = false;
-
-            if (mediaCodec != null) {
-                try {
-                    // 发送 EOS 并等待处理完成
-                    drainEncoder(true);
-                    mediaCodec.stop();
-                    mediaCodec.release();
-                    Log.d(TAG, "MediaCodec released");
-                } catch (Exception e) {
-                    Log.e(TAG, "释放 MediaCodec 失败", e);
-                }
-                mediaCodec = null;
-            }
-
-            if (mediaMuxer != null) {
-                try {
-                    if (muxerStarted) {
-                        mediaMuxer.stop();
-                    }
-                    mediaMuxer.release();
-                    Log.d(TAG, "MediaMuxer released, file: " + currentVideoPath);
-                } catch (Exception e) {
-                    Log.e(TAG, "释放 MediaMuxer 失败", e);
-                }
-                mediaMuxer = null;
-            }
-
-            videoTrackIndex = -1;
-            muxerStarted = false;
         }
+
+        // 在后台线程执行释放操作，避免阻塞主线程导致ANR
+        new Thread(() -> {
+            synchronized (encoderLock) {
+                releaseVideoEncoderInternal();
+            }
+        }, "VideoEncoderRelease").start();
+    }
+
+    /**
+     * 内部释放方法（必须在 encoderLock 同步块内调用）
+     */
+    private void releaseVideoEncoderInternal() {
+        isRecording = false;
+
+        if (mediaCodec != null) {
+            try {
+                // 发送 EOS 并等待处理完成
+                drainEncoder(true);
+                mediaCodec.stop();
+                mediaCodec.release();
+                Log.d(TAG, "MediaCodec released");
+            } catch (Exception e) {
+                Log.e(TAG, "释放 MediaCodec 失败", e);
+            }
+            mediaCodec = null;
+        }
+
+        if (mediaMuxer != null) {
+            try {
+                if (muxerStarted) {
+                    mediaMuxer.stop();
+                }
+                mediaMuxer.release();
+                Log.d(TAG, "MediaMuxer released, file: " + currentVideoPath);
+            } catch (Exception e) {
+                Log.e(TAG, "释放 MediaMuxer 失败", e);
+            }
+            mediaMuxer = null;
+        }
+
+        videoTrackIndex = -1;
+        muxerStarted = false;
     }
 
     /**
@@ -379,11 +468,19 @@ public class CameraPureFaceProcessor {
             }
         }
 
+        // 使用非阻塞模式（0超时），除非是结束时需要等待
+        long timeoutUs = endOfStream ? 10000 : 0;
         MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
-        while (true) {
-            int outputBufferIndex = mediaCodec.dequeueOutputBuffer(bufferInfo, 10000);
+
+        // 限制单次调用最多处理的输出缓冲区数量，避免阻塞太久
+        int maxOutputBuffers = endOfStream ? 100 : 5;
+        int processedBuffers = 0;
+
+        while (processedBuffers < maxOutputBuffers) {
+            int outputBufferIndex = mediaCodec.dequeueOutputBuffer(bufferInfo, timeoutUs);
             if (outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
                 if (!endOfStream) break;
+                // endOfStream时继续等待
             } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 if (muxerStarted) {
                     Log.w(TAG, "Format changed after muxer started");
@@ -402,6 +499,7 @@ public class CameraPureFaceProcessor {
                     mediaMuxer.writeSampleData(videoTrackIndex, outputBuffer, bufferInfo);
                 }
                 mediaCodec.releaseOutputBuffer(outputBufferIndex, false);
+                processedBuffers++;
                 if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                     break;
                 }
@@ -447,32 +545,242 @@ public class CameraPureFaceProcessor {
         return yuv;
     }
 
+    /**
+     * 直接从 YUV_420_888 Image 转换为 NV12 格式（带旋转）
+     * 避免中间 ARGB 转换，性能更好
+     * @param image YUV_420_888 格式的 Image
+     * @param rotationDegrees 旋转角度（仅支持 0, 90, 180, 270）
+     * @return NV12 格式的字节数组
+     */
+    private byte[] imageToNv12WithRotation(Image image, int rotationDegrees) {
+        int srcWidth = image.getWidth();
+        int srcHeight = image.getHeight();
+
+        // 计算旋转后的尺寸
+        int dstWidth, dstHeight;
+        if (rotationDegrees == 90 || rotationDegrees == 270) {
+            dstWidth = srcHeight;
+            dstHeight = srcWidth;
+        } else {
+            dstWidth = srcWidth;
+            dstHeight = srcHeight;
+        }
+
+        Image.Plane[] planes = image.getPlanes();
+        ByteBuffer yBuffer = planes[0].getBuffer();
+        ByteBuffer uBuffer = planes[1].getBuffer();
+        ByteBuffer vBuffer = planes[2].getBuffer();
+
+        int yRowStride = planes[0].getRowStride();
+        int uvRowStride = planes[1].getRowStride();
+        int uvPixelStride = planes[1].getPixelStride();
+
+        byte[] nv12 = new byte[dstWidth * dstHeight * 3 / 2];
+        int yDstIndex = 0;
+        int uvDstIndex = dstWidth * dstHeight;
+
+        // 根据旋转角度计算源像素位置
+        for (int dstRow = 0; dstRow < dstHeight; dstRow++) {
+            for (int dstCol = 0; dstCol < dstWidth; dstCol++) {
+                int srcRow, srcCol;
+
+                switch (rotationDegrees) {
+                    case 90:
+                        srcRow = dstWidth - 1 - dstCol;
+                        srcCol = dstRow;
+                        break;
+                    case 180:
+                        srcRow = dstHeight - 1 - dstRow;
+                        srcCol = dstWidth - 1 - dstCol;
+                        break;
+                    case 270:
+                        srcRow = dstCol;
+                        srcCol = dstHeight - 1 - dstRow;
+                        break;
+                    default: // 0
+                        srcRow = dstRow;
+                        srcCol = dstCol;
+                        break;
+                }
+
+                // Y 分量
+                int yIndex = srcRow * yRowStride + srcCol;
+                nv12[yDstIndex++] = yBuffer.get(yIndex);
+
+                // UV 分量（2x2 下采样）
+                if (dstRow % 2 == 0 && dstCol % 2 == 0) {
+                    int uvRow = srcRow / 2;
+                    int uvCol = srcCol / 2;
+                    int uvIndex = uvRow * uvRowStride + uvCol * uvPixelStride;
+
+                    nv12[uvDstIndex++] = uBuffer.get(uvIndex);
+                    nv12[uvDstIndex++] = vBuffer.get(uvIndex);
+                }
+            }
+        }
+
+        return nv12;
+    }
+
+    /**
+     * 直接从 YUV 数据写入视频（不做旋转，用 MediaMuxer orientation hint）
+     */
+    private void writeYuvToVideo(Image image) {
+        if (!isRecording || mediaCodec == null) {
+            return;
+        }
+
+        // 检查队列是否满，满则直接丢弃这帧（避免无意义的内存分配）
+        if (encoderQueue.remainingCapacity() == 0) {
+            droppedFrameCount++;
+            return;
+        }
+
+        final long captureTimeNs = System.nanoTime();
+
+        // 复用或创建 NV12 缓冲区
+        int bufferSize = VIDEO_WIDTH * VIDEO_HEIGHT * 3 / 2;
+        if (nv12Buffer == null || nv12Buffer.length != bufferSize) {
+            nv12Buffer = new byte[bufferSize];
+        }
+
+        // 直接复制到缓冲区
+        imageToNv12FastInPlace(image, nv12Buffer);
+
+        // 复制一份用于异步编码（因为下一帧会覆盖 nv12Buffer）
+        final byte[] nv12Data = nv12Buffer.clone();
+
+        videoEncoderExecutor.execute(() -> {
+            writeNv12ToVideoInternal(nv12Data, captureTimeNs);
+        });
+    }
+
+    /**
+     * 快速 YUV_420_888 转 NV12（原地写入，不分配新数组）
+     */
+    private void imageToNv12FastInPlace(Image image, byte[] nv12) {
+        int width = image.getWidth();
+        int height = image.getHeight();
+
+        Image.Plane[] planes = image.getPlanes();
+        ByteBuffer yBuffer = planes[0].getBuffer();
+        ByteBuffer uBuffer = planes[1].getBuffer();
+        ByteBuffer vBuffer = planes[2].getBuffer();
+
+        int yRowStride = planes[0].getRowStride();
+        int uvRowStride = planes[1].getRowStride();
+        int uvPixelStride = planes[1].getPixelStride();
+
+        // Copy Y plane
+        int yPos = 0;
+        for (int row = 0; row < height; row++) {
+            yBuffer.position(row * yRowStride);
+            yBuffer.get(nv12, yPos, width);
+            yPos += width;
+        }
+
+        // Copy UV plane (interleaved)
+        int uvPos = width * height;
+        for (int row = 0; row < height / 2; row++) {
+            for (int col = 0; col < width / 2; col++) {
+                int uvIndex = row * uvRowStride + col * uvPixelStride;
+                nv12[uvPos++] = uBuffer.get(uvIndex);
+                nv12[uvPos++] = vBuffer.get(uvIndex);
+            }
+        }
+
+        // 重置 buffer position
+        yBuffer.rewind();
+        uBuffer.rewind();
+        vBuffer.rewind();
+    }
+
+    /**
+     * 将 NV12 数据写入编码器
+     */
+    private void writeNv12ToVideoInternal(byte[] nv12Data, long captureTimeNs) {
+        // 首次执行时设置线程优先级（只执行一次）
+        if (!encoderPrioritySet) {
+            encoderPrioritySet = true;
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
+            Log.d(TAG, "编码线程优先级已设置为 URGENT_AUDIO");
+        }
+
+        synchronized (encoderLock) {
+            if (!isRecording || mediaCodec == null) {
+                if (mediaCodec == null && isRecording) {
+                    Log.e(TAG, "编码器异常: isRecording=true 但 mediaCodec=null!");
+                }
+                return;
+            }
+            try {
+                int inputBufferIndex = mediaCodec.dequeueInputBuffer(5000);  // 5ms 超时（进一步减少阻塞）
+                if (inputBufferIndex >= 0) {
+                    ByteBuffer inputBuffer = mediaCodec.getInputBuffer(inputBufferIndex);
+                    if (inputBuffer != null) {
+                        inputBuffer.clear();
+                        inputBuffer.put(nv12Data);
+                        long presentationTimeUs = (captureTimeNs - recordingStartTimeNs) / 1000;
+                        mediaCodec.queueInputBuffer(inputBufferIndex, 0, nv12Data.length, presentationTimeUs, 0);
+                        encodedFrameCount++;
+                        if (encodedFrameCount % 30 == 0) {  // 每30帧打印一次
+                            Log.d(TAG, "视频编码帧数: " + encodedFrameCount + ", 丢帧: " + droppedFrameCount);
+                        }
+                    }
+                } else {
+                    droppedFrameCount++;
+                    if (droppedFrameCount % 30 == 0) {
+                        Log.w(TAG, "编码器丢帧(无可用缓冲): " + droppedFrameCount);
+                    }
+                }
+                drainEncoder(false);
+            } catch (IllegalStateException e) {
+                Log.e(TAG, "编码器状态异常 - 可能已被释放", e);
+            } catch (Exception e) {
+                Log.e(TAG, "NV12写入失败", e);
+            }
+        }
+    }
+
     private final ImageReader.OnImageAvailableListener onImageAvailableListener = reader -> {
         Image image = null;
         try {
             image = reader.acquireNextImage();
             if (image != null && isCameraRunning) {
-                Bitmap bitmap = convertYUVToBitmap(image, 270);
+                frameIndex++;
 
-                // 写入视频帧（即使模型未加载也录制）
-                if (bitmap != null && isRecording) {
-                    writeFrameToVideo(bitmap);
+                // 1. 视频编码：直接从 YUV 写入，不经过 Bitmap（每帧都编码）
+                // 使用 MediaMuxer orientation hint 处理旋转，不在转换时旋转
+                if (isRecording) {
+                    writeYuvToVideo(image);
                 }
 
-                // 模型未加载完成时跳过AI处理，仅录制
-                if (!isInitialized || facePreProcessor == null) {
-                    return;
-                }
+                // 2. AI 处理：只在每 N 帧执行一次（降低CPU负载）
+                // 并且只有上一帧处理完成后才处理新帧（防止堆积）
+                boolean shouldProcessAI = (frameIndex % AI_PROCESS_INTERVAL == 0);
 
-                long timestamp = System.nanoTime();
+                if (shouldProcessAI && isInitialized && facePreProcessor != null && !isAIProcessing) {
+                    // 标记开始处理（防止并发）
+                    isAIProcessing = true;
 
-                faceMesh.send(bitmap, timestamp);
-                faceMesh.setResultListener(result -> {
-                    if (isCameraRunning) {
-                        // 如果还需要原始方向的 bitmap 作后续处理，可以再 copy 一份
-                        facePreProcessor.addFrameResults(result, bitmap.copy(Bitmap.Config.ARGB_8888, true));
+                    // 只有需要 AI 处理时才创建 Bitmap
+                    Bitmap bitmap = convertYUVToBitmap(image, 270);
+                    if (bitmap != null) {
+                        // 回收旧的pending bitmap（如果有的话）
+                        synchronized (bitmapLock) {
+                            if (pendingBitmap != null) {
+                                pendingBitmap.recycle();
+                            }
+                            pendingBitmap = bitmap;  // 设置新的待处理bitmap
+                        }
+
+                        long timestamp = System.nanoTime();
+                        faceMesh.send(bitmap, timestamp);
+                        // 注意：ResultListener 已经在 setupFaceMesh 中设置，这里不再重复设置
+                    } else {
+                        isAIProcessing = false;  // bitmap创建失败，重置标记
                     }
-                });
+                }
             }
         } catch (Exception e) {
             Log.e(TAG, "Error processing image", e);
@@ -491,6 +799,11 @@ public class CameraPureFaceProcessor {
         if (!checkCameraPermission()) {
             return;
         }
+
+        // 重置质量评估器和帧计数
+        resetQualityEvaluator();
+        frameIndex = 0;
+
         SharedPreferences prefs = activity.getSharedPreferences("AppSettings", Context.MODE_PRIVATE);
         String experimentId = prefs.getString("experiment_id", "default");
         final String baseDir = Environment
@@ -546,8 +859,13 @@ public class CameraPureFaceProcessor {
                     long loadTime = System.currentTimeMillis() - startTime;
                     Log.d(TAG, "ONNX模型加载完成，耗时: " + loadTime + "ms");
 
-                    // 通知初始化完成
+                    // 通知初始化完成，并启动视频编码器
                     mainHandler.post(() -> {
+                        // 模型加载完成后再启动视频编码器，确保质量评估统计完整
+                        resetQualityEvaluator();  // 重置质量评估器
+                        setupVideoEncoder();
+                        Log.d(TAG, "视频编码器已启动（模型加载后）");
+
                         if (initListener != null) {
                             initListener.onInitialized();
                         }
@@ -574,6 +892,15 @@ public class CameraPureFaceProcessor {
     public void stopCamera() {
         isCameraRunning = false;
         isInitialized = false;
+
+        // 清理待处理的 Bitmap（防止内存泄漏）
+        synchronized (bitmapLock) {
+            if (pendingBitmap != null) {
+                pendingBitmap.recycle();
+                pendingBitmap = null;
+            }
+        }
+        isAIProcessing = false;
 
         // 停止并释放 MediaCodec 编码器
         releaseVideoEncoder();
@@ -605,6 +932,23 @@ public class CameraPureFaceProcessor {
         if (imageReader != null) {
             imageReader.close();
             imageReader = null;
+        }
+
+        // 计算并回调视频质量评估结果
+        Log.i(TAG, "stopCamera: 开始计算质量评估, facePreProcessor=" + facePreProcessor);
+        if (facePreProcessor != null) {
+            VideoQualityEvaluator.QualityResult result = facePreProcessor.evaluateQuality();
+            Log.i(TAG, "视频质量评估完成:\n" + result.toString());
+
+            // 将质量评估报告写入 txt 文件
+            saveQualityReportToFile(result);
+
+            Log.i(TAG, "qualityResultListener=" + qualityResultListener);
+            if (qualityResultListener != null) {
+                mainHandler.post(() -> qualityResultListener.onQualityResult(result));
+            }
+        } else {
+            Log.w(TAG, "stopCamera: facePreProcessor为null，无法评估质量");
         }
 
         if (callback != null) {
@@ -645,8 +989,13 @@ public class CameraPureFaceProcessor {
                 return;
             }
 
-            // 初始化 MediaCodec 编码器（在 ImageReader 回调中写入帧，不需要额外 Surface）
-            setupVideoEncoder();
+            // 如果模型已经预加载完成（setPreloadedEstimator），立即启动视频编码器
+            // 否则等待异步加载完成后再启动
+            if (isInitialized && facePreProcessor != null) {
+                resetQualityEvaluator();
+                setupVideoEncoder();
+                Log.d(TAG, "视频编码器已启动（预加载模型）");
+            }
 
             // 使用 TEMPLATE_PREVIEW（只需要2个Surface：预览 + ImageReader）
             captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
@@ -843,5 +1192,91 @@ public class CameraPureFaceProcessor {
         byte[] bytes = new byte[buffer.remaining()];
         buffer.get(bytes);
         return BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+    }
+
+    /**
+     * 设置视频质量评估结果监听器
+     */
+    public void setOnQualityResultListener(OnQualityResultListener listener) {
+        this.qualityResultListener = listener;
+    }
+
+    /**
+     * 获取视频质量评估结果
+     */
+    public VideoQualityEvaluator.QualityResult getQualityResult() {
+        if (facePreProcessor != null) {
+            return facePreProcessor.evaluateQuality();
+        }
+        return null;
+    }
+
+    /**
+     * 重置视频质量评估器
+     */
+    public void resetQualityEvaluator() {
+        if (facePreProcessor != null) {
+            facePreProcessor.resetQualityEvaluator();
+            Log.d(TAG, "质量评估器已重置");
+        }
+    }
+
+    /**
+     * 将质量评估报告写入 txt 文件
+     */
+    private void saveQualityReportToFile(VideoQualityEvaluator.QualityResult result) {
+        if (currentVideoPath == null || result == null) {
+            Log.w(TAG, "无法保存质量报告：视频路径或结果为空");
+            return;
+        }
+
+        try {
+            // 从视频路径获取 front 目录
+            File videoFile = new File(currentVideoPath);
+            File frontDir = videoFile.getParentFile();
+
+            if (frontDir == null || !frontDir.exists()) {
+                Log.w(TAG, "front 目录不存在");
+                return;
+            }
+
+            // 生成报告文件名（与视频文件名对应）
+            String videoName = videoFile.getName().replace(".mp4", "");
+            String reportFileName = videoName + "_quality_report.txt";
+            File reportFile = new File(frontDir, reportFileName);
+
+            // 生成报告内容
+            StringBuilder report = new StringBuilder();
+            report.append("========== 视频质量评估报告 ==========\n");
+            report.append("生成时间: ").append(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(new java.util.Date())).append("\n");
+            report.append("视频文件: ").append(videoFile.getName()).append("\n");
+            report.append("\n");
+            report.append("---------- 基础统计 ----------\n");
+            report.append("总帧数: ").append(result.totalFrames).append("\n");
+            report.append("有效帧数: ").append(result.validFrames).append("\n");
+            report.append("\n");
+            report.append("---------- 质量指标 ----------\n");
+            report.append(String.format(java.util.Locale.getDefault(), "人脸检测率: %.1f%%\n", result.faceDetectionRate * 100));
+            report.append(String.format(java.util.Locale.getDefault(), "平均人脸面积: %.1f%%\n", result.avgFaceAreaRatio * 100));
+            report.append(String.format(java.util.Locale.getDefault(), "位置稳定性: %.1f%%\n", result.positionStability * 100));
+            report.append(String.format(java.util.Locale.getDefault(), "平均亮度: %.0f\n", result.avgBrightness));
+            report.append(String.format(java.util.Locale.getDefault(), "亮度稳定性: %.1f%%\n", result.brightnessStability * 100));
+            report.append("\n");
+            report.append("---------- 综合评估 ----------\n");
+            report.append(String.format(java.util.Locale.getDefault(), "综合评分: %.0f 分\n", result.overallScore));
+            report.append("质量等级: ").append(result.qualityLevel).append("\n");
+            report.append("\n");
+            report.append("========================================\n");
+
+            // 写入文件
+            java.io.FileWriter writer = new java.io.FileWriter(reportFile);
+            writer.write(report.toString());
+            writer.close();
+
+            Log.i(TAG, "质量评估报告已保存: " + reportFile.getAbsolutePath());
+
+        } catch (Exception e) {
+            Log.e(TAG, "保存质量评估报告失败", e);
+        }
     }
 }

@@ -39,6 +39,7 @@ import com.tsinghua.sample.core.SessionManager;
 import com.tsinghua.sample.utils.FacePreprocessor;
 import com.tsinghua.sample.utils.HeartRateEstimator;
 import com.tsinghua.sample.utils.PlotView;
+import com.tsinghua.sample.utils.VideoQualityEvaluator;
 
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
@@ -125,6 +126,14 @@ public class CameraFaceProcessor {
         void onFaceDetected(Bitmap faceBitmap);
         void onFaceProcessingResult(Object result); // Replace Object with your specific result type
     }
+
+    /**
+     * 视频质量评估回调
+     */
+    public interface OnQualityResultListener {
+        void onQualityResult(VideoQualityEvaluator.QualityResult result);
+    }
+    private OnQualityResultListener qualityResultListener;
 
     /**
      * 初始化完成回调
@@ -259,6 +268,9 @@ public class CameraFaceProcessor {
                 droppedFrameCount = 0;
                 isRecording = true;
 
+                // 重置质量评估器
+                resetQualityEvaluator();
+
                 Log.d(TAG, "MediaCodec + MediaMuxer 初始化成功: " + currentVideoPath);
             }
         } catch (Exception e) {
@@ -304,6 +316,19 @@ public class CameraFaceProcessor {
 
             videoTrackIndex = -1;
             muxerStarted = false;
+        }
+
+        // 计算并回调视频质量评估结果
+        Log.i(TAG, "releaseVideoEncoder: 开始计算质量评估, facePreProcessor=" + facePreProcessor);
+        if (facePreProcessor != null) {
+            VideoQualityEvaluator.QualityResult result = facePreProcessor.evaluateQuality();
+            Log.i(TAG, "视频质量评估完成:\n" + result.toString());
+            Log.i(TAG, "qualityResultListener=" + qualityResultListener);
+            if (qualityResultListener != null) {
+                mainHandler.post(() -> qualityResultListener.onQualityResult(result));
+            }
+        } else {
+            Log.w(TAG, "releaseVideoEncoder: facePreProcessor为null，无法评估质量");
         }
     }
 
@@ -877,5 +902,32 @@ public class CameraFaceProcessor {
         byte[] bytes = new byte[buffer.remaining()];
         buffer.get(bytes);
         return BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+    }
+
+    /**
+     * 设置视频质量评估结果监听器
+     */
+    public void setOnQualityResultListener(OnQualityResultListener listener) {
+        this.qualityResultListener = listener;
+    }
+
+    /**
+     * 获取视频质量评估结果（录制结束时调用）
+     */
+    public VideoQualityEvaluator.QualityResult getQualityResult() {
+        if (facePreProcessor != null) {
+            return facePreProcessor.evaluateQuality();
+        }
+        return null;
+    }
+
+    /**
+     * 重置视频质量评估器（录制开始时自动调用）
+     */
+    private void resetQualityEvaluator() {
+        if (facePreProcessor != null) {
+            facePreProcessor.resetQualityEvaluator();
+            Log.d(TAG, "质量评估器已重置");
+        }
     }
 }

@@ -57,6 +57,7 @@ import com.tsinghua.sample.model.Device;
 import com.tsinghua.sample.utils.NotificationHandler;
 import com.tsinghua.sample.utils.HeartRateEstimator;
 import com.tsinghua.sample.utils.PlotView;
+import com.tsinghua.sample.utils.VideoQualityEvaluator;
 import com.tsinghua.sample.ecg.ECGMeasurementController;
 import com.vivalnk.sdk.BuildConfig;
 import com.vivalnk.sdk.VitalClient;
@@ -519,6 +520,75 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
         }
     }
 
+    /**
+     * 显示视频质量评估结果对话框
+     */
+    private void showQualityResultDialog(VideoQualityEvaluator.QualityResult result) {
+        showQualityResultDialog(result, null);
+    }
+
+    /**
+     * 显示视频质量评估结果对话框，对话框关闭后执行回调
+     */
+    private void showQualityResultDialog(VideoQualityEvaluator.QualityResult result, Runnable onDismiss) {
+        if (result == null) {
+            if (onDismiss != null) onDismiss.run();
+            return;
+        }
+
+        // 根据质量等级设置颜色
+        int colorRes;
+        switch (result.qualityLevel) {
+            case "EXCELLENT":
+                colorRes = android.R.color.holo_green_dark;
+                break;
+            case "GOOD":
+                colorRes = android.R.color.holo_blue_dark;
+                break;
+            case "FAIR":
+                colorRes = android.R.color.holo_orange_dark;
+                break;
+            default:
+                colorRes = android.R.color.holo_red_dark;
+                break;
+        }
+
+        String qualityLevelCN;
+        switch (result.qualityLevel) {
+            case "EXCELLENT": qualityLevelCN = "优秀"; break;
+            case "GOOD": qualityLevelCN = "良好"; break;
+            case "FAIR": qualityLevelCN = "一般"; break;
+            default: qualityLevelCN = "较差"; break;
+        }
+
+        String message = String.format(
+            "质量等级: %s\n综合评分: %.0f分\n\n" +
+            "详细指标:\n" +
+            "• 人脸检测率: %.1f%%\n" +
+            "• 位置稳定性: %.1f%%\n" +
+            "• 亮度稳定性: %.1f%%\n" +
+            "• 平均人脸面积: %.1f%%\n\n" +
+            "总帧数: %d, 有效帧: %d",
+            qualityLevelCN, result.overallScore,
+            result.faceDetectionRate * 100,
+            result.positionStability * 100,
+            result.brightnessStability * 100,
+            result.avgFaceAreaRatio * 100,
+            result.totalFrames, result.validFrames
+        );
+
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("视频质量评估")
+            .setMessage(message)
+            .setPositiveButton("确定", (dialog, which) -> {
+                if (onDismiss != null) onDismiss.run();
+            })
+            .setOnCancelListener(dialog -> {
+                if (onDismiss != null) onDismiss.run();
+            })
+            .show();
+    }
+
     // 前置摄像头控制方法
     public void startFrontCameraRecording() {
         Log.d("Camera", "startFrontCameraRecording called, frontCameraRecording=" + frontCameraRecording);
@@ -544,6 +614,8 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
                     cameraPureFaceProcessor.setOnHeartRateListener(heartRate -> {
                         runOnUiThread(() -> updateHeartRateDisplay(Math.round(heartRate)));
                     });
+
+                    // 质量评估结果在stopAllRecording中同步获取，不使用异步回调
 
                     // 使用预加载的模型（如果可用）
                     if (isModelLoaded && preloadedEstimator != null) {
@@ -586,6 +658,8 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
                     cameraFaceProcessor.setOnHeartRateListener(heartRate -> {
                         runOnUiThread(() -> updateHeartRateDisplay(Math.round(heartRate)));
                     });
+
+                    // 质量评估结果在stopAllRecording中同步获取，不使用异步回调
 
                     // 使用预加载的模型（如果可用）
                     if (isModelLoaded && preloadedEstimator != null) {
@@ -714,6 +788,15 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
         recordingCoordinator.setAutoStopCallback(() -> {
             runOnUiThread(() -> {
                 try {
+                    // 先获取质量评估结果（在停止相机之前）
+                    VideoQualityEvaluator.QualityResult qualityResult = null;
+                    if (cameraPureFaceProcessor != null) {
+                        qualityResult = cameraPureFaceProcessor.getQualityResult();
+                    } else if (cameraFaceProcessor != null) {
+                        qualityResult = cameraFaceProcessor.getQualityResult();
+                    }
+                    final VideoQualityEvaluator.QualityResult finalQualityResult = qualityResult;
+
                     // 停止摄像头录制
                     stopFrontCameraRecording();
                     stopBackCameraRecording();
@@ -728,8 +811,12 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
                     setCameraPlaceholderText("点击开始录制显示预览");
                     Toast.makeText(this, "录制时长到达，自动停止", Toast.LENGTH_SHORT).show();
 
-                    // 跳转到患者信息页面
-                    navigateToPatientInfo();
+                    // 显示质量评估对话框，关闭后跳转到患者信息页面
+                    if (finalQualityResult != null) {
+                        showQualityResultDialog(finalQualityResult, this::navigateToPatientInfo);
+                    } else {
+                        navigateToPatientInfo();
+                    }
                 } catch (Exception e) {
                     Log.e("ListActivity", "Error in autoStopCallback UI update", e);
                 }
@@ -816,6 +903,17 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
     }
 
     private void stopAllRecording() {
+        // 先获取质量评估结果（在停止相机之前，否则processor会被置空）
+        VideoQualityEvaluator.QualityResult qualityResult = null;
+        if (cameraPureFaceProcessor != null) {
+            qualityResult = cameraPureFaceProcessor.getQualityResult();
+            Log.d("ListActivity", "从cameraPureFaceProcessor获取质量结果: " + qualityResult);
+        } else if (cameraFaceProcessor != null) {
+            qualityResult = cameraFaceProcessor.getQualityResult();
+            Log.d("ListActivity", "从cameraFaceProcessor获取质量结果: " + qualityResult);
+        }
+        final VideoQualityEvaluator.QualityResult finalQualityResult = qualityResult;
+
         stopFrontCameraRecording();
         stopBackCameraRecording();
         if (recordingCoordinator != null) {
@@ -833,8 +931,13 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
 
         Toast.makeText(this, "一键录制已停止", Toast.LENGTH_SHORT).show();
 
-        // 跳转到患者信息页面
-        navigateToPatientInfo();
+        // 显示质量评估对话框，关闭后跳转到患者信息页面
+        if (finalQualityResult != null) {
+            showQualityResultDialog(finalQualityResult, this::navigateToPatientInfo);
+        } else {
+            // 如果没有质量结果，直接跳转
+            navigateToPatientInfo();
+        }
     }
 
     /**
@@ -1165,7 +1268,7 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
 
         // 检查USB血氧仪状态（处理广播可能漏收的情况）
         OximeterManager oxManager = OximeterManager.getInstance();
-        if (oxManager != null && !oxManager.isConnected()) {
+        if (oxManager != null && !oxManager.isConnected() && usbManager != null) {
             // 检查是否有USB设备连接但未建立连接
             HashMap<String, UsbDevice> deviceList = usbManager.getDeviceList();
             if (!deviceList.isEmpty()) {

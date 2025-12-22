@@ -44,6 +44,7 @@ public class OximeterViewHolder extends RecyclerView.ViewHolder {
     public View headerLayout;
     public View expandArrow;
     public TextView debugLogText;  // 调试日志显示
+    public PlotView bvpWaveView;   // BVP波形显示
 
     private boolean infoVisible = false;
     private BufferedWriter logWriter;
@@ -70,6 +71,13 @@ public class OximeterViewHolder extends RecyclerView.ViewHolder {
         headerLayout = itemView.findViewById(R.id.headerLayout);
         expandArrow = itemView.findViewById(R.id.expandArrow);
         debugLogText = itemView.findViewById(R.id.debugLogText);
+        bvpWaveView = itemView.findViewById(R.id.bvpWaveView);
+
+        // 初始化波形显示设置
+        if (bvpWaveView != null) {
+            bvpWaveView.setPlotColor(0xFF1E88E5);  // 蓝色波形，与血氧颜色一致
+            bvpWaveView.setAxisColor(0x331E88E5);  // 淡蓝色坐标轴
+        }
 
         // 点击头部折叠/展开
         if (headerLayout != null) {
@@ -91,10 +99,15 @@ public class OximeterViewHolder extends RecyclerView.ViewHolder {
                 mainHandler.post(() -> appendDebugLog(msg));
             });
             manager.setDataListener(data -> {
-                // 节流UI更新：避免数据过快导致主线程阻塞
+                // 波形数据不受节流限制，直接更新（PlotView内部有批量更新机制）
+                if (data != null && data.bvp >= 0 && bvpWaveView != null) {
+                    mainHandler.post(() -> bvpWaveView.addValue(data.bvp));
+                }
+
+                // 文本UI节流更新：避免数据过快导致主线程阻塞
                 long now = System.currentTimeMillis();
                 if (now - lastUiUpdateTime < UI_UPDATE_INTERVAL_MS) {
-                    return;  // 跳过本次UI更新
+                    return;  // 跳过本次文本UI更新
                 }
                 lastUiUpdateTime = now;
 
@@ -104,7 +117,7 @@ public class OximeterViewHolder extends RecyclerView.ViewHolder {
                             isConnected = true;
                             updateConnectionStatus(true);
                         }
-                        bindData(data);
+                        bindTextData(data);
                     }
                 });
             });
@@ -176,6 +189,21 @@ public class OximeterViewHolder extends RecyclerView.ViewHolder {
     public void bindData(OximeterData data) {
         if (data.hr >= 0) hrText.setText("HR: " + data.hr + " bpm");
         if (data.spo2 >= 0) spo2Text.setText("SpO2: " + data.spo2 + " %");
+
+        // 更新BVP波形显示
+        if (bvpWaveView != null && data.bvp >= 0) {
+            bvpWaveView.addValue(data.bvp);
+        }
+
+        recordData(data);
+    }
+
+    /**
+     * 只更新文本数据（HR、SpO2），用于节流场景
+     */
+    private void bindTextData(OximeterData data) {
+        if (data.hr >= 0) hrText.setText("HR: " + data.hr + " bpm");
+        if (data.spo2 >= 0) spo2Text.setText("SpO2: " + data.spo2 + " %");
         recordData(data);
     }
 
@@ -194,6 +222,11 @@ public class OximeterViewHolder extends RecyclerView.ViewHolder {
             // 使用统一的CSV表头
             logWriter.write(Constants.CSV_HEADER_SPO2 + "\n");
             isRecording = true;
+
+            // 开始录制时清除旧波形数据
+            if (bvpWaveView != null) {
+                bvpWaveView.clearPlot();
+            }
 
             // 通过OximeterManager启动录制（Service已在ListActivity管理）
             OximeterManager manager = OximeterManager.getInstance();
@@ -220,6 +253,11 @@ public class OximeterViewHolder extends RecyclerView.ViewHolder {
             OximeterManager manager = OximeterManager.getInstance();
             if (manager != null) {
                 manager.stopRecording();
+            }
+
+            // 停止录制时强制刷新波形显示
+            if (bvpWaveView != null) {
+                bvpWaveView.forceRefresh();
             }
 
             Log.i(TAG, "SpO2 recording stopped");
