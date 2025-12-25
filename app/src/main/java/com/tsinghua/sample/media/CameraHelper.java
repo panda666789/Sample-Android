@@ -41,6 +41,9 @@ public class CameraHelper {
     private boolean frontCallbackAdded = false;
     private boolean backCallbackAdded = false;
 
+    // 关闭状态标志 - 防止release后回调继续执行
+    private volatile boolean isClosed = false;
+
     public boolean isFrontPreviewReady() {
         return frontPreviewReady;
     }
@@ -115,7 +118,12 @@ public class CameraHelper {
     private final SurfaceHolder.Callback surfaceCallbackFront = new SurfaceHolder.Callback() {
         @Override
         public void surfaceCreated(SurfaceHolder holder) {
-            Log.d(TAG, "Front surface created, isRecording=" + isRecordingFront);
+            Log.d(TAG, "Front surface created, isRecording=" + isRecordingFront + ", isClosed=" + isClosed);
+            // 检查是否已关闭，防止release后回调继续执行
+            if (isClosed) {
+                Log.d(TAG, "CameraHelper already closed, ignoring front surfaceCreated");
+                return;
+            }
             if (isRecordingFront) {
                 // 录制中Surface重新创建，尝试恢复预览
                 // 注意：MediaRecorder已经在运行，只需要重新启动预览请求
@@ -132,7 +140,12 @@ public class CameraHelper {
             Log.d(TAG, "Front surface changed: " + width + "x" + height);
         }
         public void surfaceDestroyed(SurfaceHolder holder) {
-            Log.d(TAG, "Front surface destroyed, isRecording=" + isRecordingFront);
+            Log.d(TAG, "Front surface destroyed, isRecording=" + isRecordingFront + ", isClosed=" + isClosed);
+            // 如果已关闭，不做任何操作
+            if (isClosed) {
+                Log.d(TAG, "CameraHelper already closed, ignoring front surfaceDestroyed");
+                return;
+            }
             // 只有在非录制状态时才关闭相机
             // 录制时保持相机打开，避免录制中断
             if (!isRecordingFront) {
@@ -150,7 +163,12 @@ public class CameraHelper {
     private final SurfaceHolder.Callback surfaceCallbackBack = new SurfaceHolder.Callback() {
         @Override
         public void surfaceCreated(SurfaceHolder holder) {
-            Log.d(TAG, "Back surface created, isRecording=" + isRecordingBack);
+            Log.d(TAG, "Back surface created, isRecording=" + isRecordingBack + ", isClosed=" + isClosed);
+            // 检查是否已关闭
+            if (isClosed) {
+                Log.d(TAG, "CameraHelper already closed, ignoring back surfaceCreated");
+                return;
+            }
             if (isRecordingBack) {
                 Log.d(TAG, "Surface recreated during recording, attempting to restore preview");
                 if (cameraDeviceBack != null && holder.getSurface() != null && holder.getSurface().isValid()) {
@@ -164,7 +182,12 @@ public class CameraHelper {
             Log.d(TAG, "Back surface changed: " + width + "x" + height);
         }
         public void surfaceDestroyed(SurfaceHolder holder) {
-            Log.d(TAG, "Back surface destroyed, isRecording=" + isRecordingBack);
+            Log.d(TAG, "Back surface destroyed, isRecording=" + isRecordingBack + ", isClosed=" + isClosed);
+            // 如果已关闭，不做任何操作
+            if (isClosed) {
+                Log.d(TAG, "CameraHelper already closed, ignoring back surfaceDestroyed");
+                return;
+            }
             // 只有在非录制状态时才关闭相机
             if (!isRecordingBack) {
                 if (cameraDeviceBack != null) {
@@ -206,7 +229,12 @@ public class CameraHelper {
     }
 
     private void openCamera(String cameraId, boolean isFront) {
-        Log.d(TAG, "openCamera called: cameraId=" + cameraId + ", isFront=" + isFront);
+        Log.d(TAG, "openCamera called: cameraId=" + cameraId + ", isFront=" + isFront + ", isClosed=" + isClosed);
+        // 检查是否已关闭
+        if (isClosed) {
+            Log.d(TAG, "CameraHelper already closed, not opening camera");
+            return;
+        }
         if (cameraId == null) {
             Log.e(TAG, "Camera ID is null for " + (isFront ? "front" : "back"));
             return;
@@ -220,7 +248,13 @@ public class CameraHelper {
             cameraManager.openCamera(cameraId, new CameraDevice.StateCallback() {
                 @Override
                 public void onOpened(@NonNull CameraDevice camera) {
-                    Log.d(TAG, (isFront ? "Front" : "Back") + " camera opened");
+                    Log.d(TAG, (isFront ? "Front" : "Back") + " camera opened, isClosed=" + isClosed);
+                    // 检查是否已关闭，如果已关闭则立即关闭相机
+                    if (isClosed) {
+                        Log.d(TAG, "CameraHelper closed during camera open, closing camera immediately");
+                        camera.close();
+                        return;
+                    }
                     if (isFront) {
                         cameraDeviceFront = camera;
                         if (surfaceViewFront != null && surfaceViewFront.getHolder().getSurface() != null
@@ -268,11 +302,33 @@ public class CameraHelper {
             Log.e(TAG, "Cannot start preview: device=" + device + ", surface valid=" + (surface != null && surface.isValid()));
             return;
         }
+        // 检查是否已关闭
+        if (isClosed) {
+            Log.d(TAG, "CameraHelper already closed, not starting preview");
+            return;
+        }
         try {
             device.createCaptureSession(Arrays.asList(surface), new CameraCaptureSession.StateCallback() {
                 @Override
                 public void onConfigured(@NonNull CameraCaptureSession session) {
+                    // 关键检查：防止相机关闭后仍执行此回调导致崩溃
+                    if (isClosed) {
+                        Log.d(TAG, "CameraHelper closed during session config, closing session");
+                        try {
+                            session.close();
+                        } catch (Exception e) {
+                            Log.w(TAG, "Error closing session after CameraHelper closed", e);
+                        }
+                        return;
+                    }
                     try {
+                        // 再次检查device是否仍然有效
+                        CameraDevice currentDevice = isFront ? cameraDeviceFront : cameraDeviceBack;
+                        if (currentDevice == null || currentDevice != device) {
+                            Log.w(TAG, "Camera device changed or closed, skipping preview setup");
+                            session.close();
+                            return;
+                        }
                         CaptureRequest.Builder builder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
                         builder.addTarget(surface);
                         session.setRepeatingRequest(builder.build(), null, cameraHandler);
@@ -287,6 +343,14 @@ public class CameraHelper {
                         }
                     } catch (CameraAccessException e) {
                         Log.e(TAG, "Failed to start preview request", e);
+                    } catch (IllegalStateException e) {
+                        // CameraDevice was already closed
+                        Log.w(TAG, "Camera device closed before preview could start", e);
+                        if (isFront) {
+                            frontPreviewReady = false;
+                        } else {
+                            backPreviewReady = false;
+                        }
                     }
                 }
 
@@ -301,6 +365,14 @@ public class CameraHelper {
             }, cameraHandler);
         } catch (CameraAccessException e) {
             Log.e(TAG, "Failed to create capture session", e);
+            if (isFront) {
+                frontPreviewReady = false;
+            } else {
+                backPreviewReady = false;
+            }
+        } catch (IllegalStateException e) {
+            // CameraDevice was already closed
+            Log.w(TAG, "Camera device already closed when creating capture session", e);
             if (isFront) {
                 frontPreviewReady = false;
             } else {
@@ -330,6 +402,16 @@ public class CameraHelper {
             isRecordingFront = false;
             Log.e(TAG, "Failed to start front recording", e);
             throw e;
+        }
+    }
+
+    /**
+     * 设置双摄模式标志，用于控制后置摄像头闪光灯
+     * @param isDualMode true表示双摄模式，后置录制时自动开启闪光灯
+     */
+    public void setDualCameraMode(boolean isDualMode) {
+        if (recorderHelperBack != null) {
+            recorderHelperBack.setDualCameraMode(isDualMode);
         }
     }
 
@@ -453,23 +535,86 @@ public class CameraHelper {
 
     // 释放资源
     public void release() {
-        Log.d(TAG, "Releasing camera resources");
+        Log.d(TAG, "Releasing camera resources, isClosed was: " + isClosed);
+
+        // 【关键】首先设置关闭标志，阻止所有回调继续执行
+        isClosed = true;
+
+        // 移除SurfaceHolder回调，防止release后回调重新打开相机
+        if (surfaceViewFront != null && frontCallbackAdded) {
+            try {
+                surfaceViewFront.getHolder().removeCallback(surfaceCallbackFront);
+                Log.d(TAG, "Removed front surface callback");
+            } catch (Exception e) {
+                Log.w(TAG, "Error removing front surface callback", e);
+            }
+            frontCallbackAdded = false;
+        }
+        if (surfaceViewBack != null && backCallbackAdded) {
+            try {
+                surfaceViewBack.getHolder().removeCallback(surfaceCallbackBack);
+                Log.d(TAG, "Removed back surface callback");
+            } catch (Exception e) {
+                Log.w(TAG, "Error removing back surface callback", e);
+            }
+            backCallbackAdded = false;
+        }
 
         // 先停止录制
         if (isRecordingFront) {
-            stopFrontRecording();
+            try {
+                if (recorderHelperFront != null) {
+                    recorderHelperFront.stopFrontRecording();
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Error stopping front recording", e);
+            }
+            isRecordingFront = false;
         }
         if (isRecordingBack) {
-            stopBackRecording();
+            try {
+                if (recorderHelperBack != null) {
+                    recorderHelperBack.stopBackRecording();
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Error stopping back recording", e);
+            }
+            isRecordingBack = false;
+        }
+
+        // 关闭capture sessions
+        if (captureSessionFront != null) {
+            try {
+                captureSessionFront.close();
+            } catch (Exception e) {
+                Log.w(TAG, "Error closing front capture session", e);
+            }
+            captureSessionFront = null;
+        }
+        if (captureSessionBack != null) {
+            try {
+                captureSessionBack.close();
+            } catch (Exception e) {
+                Log.w(TAG, "Error closing back capture session", e);
+            }
+            captureSessionBack = null;
         }
 
         // 关闭相机
         if (cameraDeviceFront != null) {
-            cameraDeviceFront.close();
+            try {
+                cameraDeviceFront.close();
+            } catch (Exception e) {
+                Log.w(TAG, "Error closing front camera", e);
+            }
             cameraDeviceFront = null;
         }
         if (cameraDeviceBack != null) {
-            cameraDeviceBack.close();
+            try {
+                cameraDeviceBack.close();
+            } catch (Exception e) {
+                Log.w(TAG, "Error closing back camera", e);
+            }
             cameraDeviceBack = null;
         }
 
@@ -477,7 +622,7 @@ public class CameraHelper {
         if (cameraThread != null) {
             cameraThread.quitSafely();
             try {
-                cameraThread.join();
+                cameraThread.join(1000);  // 最多等待1秒
             } catch (InterruptedException e) {
                 Log.e(TAG, "Interrupted while waiting for camera thread", e);
             }
@@ -487,7 +632,7 @@ public class CameraHelper {
 
         frontPreviewReady = false;
         backPreviewReady = false;
-        isRecordingFront = false;
-        isRecordingBack = false;
+
+        Log.d(TAG, "Camera resources released");
     }
 }

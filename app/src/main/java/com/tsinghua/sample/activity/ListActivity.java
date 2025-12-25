@@ -756,6 +756,8 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
 
         if (frontCameraHelper != null) {
             frontCameraHelper.stopFrontRecording();
+            frontCameraHelper.release();
+            frontCameraHelper = null;
         }
 
         // 隐藏预览和心率显示
@@ -771,9 +773,11 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
         // 创建共享的IMU记录器（用于RecordingCoordinator和DeviceAdapter）
         sharedImuRecorder = new IMURecorder(this);
 
+        // 注意：摄像头录制由 ListActivity 直接管理（frontCameraHelper/backCameraHelper）
+        // RecordingCoordinator 不再管理摄像头，传入 null 避免占用 SurfaceView
         recordingCoordinator = new RecordingCoordinator(
                 this,
-                new RecorderHelper(new CameraHelper(this, mainCameraSurfaceView, pipCameraSurfaceView), this),
+                null,  // 摄像头由 ListActivity 直接控制
                 sharedImuRecorder,
                 new MultiMicAudioRecorderHelper(this),
                 OximeterManager.getInstance(this)  // 使用单例
@@ -1231,51 +1235,84 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
         boolean isDualMode = (currentCameraMode == 2);
 
         SurfaceView targetSurface;
+        boolean needDelay = false;  // 是否需要延迟等待前置相机释放
         if (isDualMode) {
             // 双摄模式：使用画中画SurfaceView
             targetSurface = pipCameraSurfaceView;
             showPipPreview();  // 显示画中画容器
         } else {
             // 单后置模式：使用主SurfaceView
+            // 重要：先释放可能占用mainCameraSurfaceView的前置摄像头资源
+            if (frontCameraHelper != null) {
+                Log.d("Camera", "Releasing frontCameraHelper before single back camera mode");
+                frontCameraHelper.release();
+                frontCameraHelper = null;
+                needDelay = true;  // 需要等待释放完成
+            }
+            // 同样释放AI模式下可能占用的处理器
+            if (cameraFaceProcessor != null) {
+                cameraFaceProcessor.stopCamera();
+                cameraFaceProcessor = null;
+                needDelay = true;
+            }
+            if (cameraPureFaceProcessor != null) {
+                cameraPureFaceProcessor.stopCamera();
+                cameraPureFaceProcessor = null;
+                needDelay = true;
+            }
             targetSurface = mainCameraSurfaceView;
             showCameraPreview();  // 隐藏占位符
         }
 
-        try {
-            // 每次都重新创建CameraHelper以使用正确的SurfaceView
-            if (backCameraHelper != null) {
-                backCameraHelper.release();
-                backCameraHelper = null;
-            }
-            backCameraHelper = new CameraHelper(this, null, targetSurface);
-
-            // 轮询等待摄像头就绪，最多等待5秒
-            final boolean finalIsDualMode = isDualMode;
-            waitForCameraReady(backCameraHelper, false, 50, () -> {
-                try {
-                    backCameraHelper.startBackRecording();
-                    backCameraActive = true;
-                    backCameraRecording = true;
-                    Log.d("Camera", "Back camera recording started successfully (dual=" + finalIsDualMode + ")");
-                } catch (Exception e) {
-                    Log.e("Camera", "Failed to start back recording: " + e.getMessage(), e);
-                    Toast.makeText(this, "后置摄像头录制启动失败", Toast.LENGTH_SHORT).show();
-                    if (finalIsDualMode) {
-                        hidePipPreview();
-                    } else {
-                        hideCameraPreview();
-                    }
+        // 封装实际启动后置相机的逻辑
+        Runnable startBackCamera = () -> {
+            try {
+                // 每次都重新创建CameraHelper以使用正确的SurfaceView
+                if (backCameraHelper != null) {
+                    backCameraHelper.release();
+                    backCameraHelper = null;
                 }
-            });
+                backCameraHelper = new CameraHelper(this, null, targetSurface);
 
-        } catch (Exception e) {
-            Log.e("Camera", "Failed to initialize back camera: " + e.getMessage(), e);
-            Toast.makeText(this, "后置摄像头初始化失败", Toast.LENGTH_SHORT).show();
-            if (isDualMode) {
-                hidePipPreview();
-            } else {
-                hideCameraPreview();
+                // 设置双摄模式标志（只在双摄模式下开启闪光灯）
+                backCameraHelper.setDualCameraMode(isDualMode);
+
+                // 轮询等待摄像头就绪，最多等待5秒
+                final boolean finalIsDualMode = isDualMode;
+                waitForCameraReady(backCameraHelper, false, 50, () -> {
+                    try {
+                        backCameraHelper.startBackRecording();
+                        backCameraActive = true;
+                        backCameraRecording = true;
+                        Log.d("Camera", "Back camera recording started successfully (dual=" + finalIsDualMode + ", flashlight=" + finalIsDualMode + ")");
+                    } catch (Exception e) {
+                        Log.e("Camera", "Failed to start back recording: " + e.getMessage(), e);
+                        Toast.makeText(this, "后置摄像头录制启动失败", Toast.LENGTH_SHORT).show();
+                        if (finalIsDualMode) {
+                            hidePipPreview();
+                        } else {
+                            hideCameraPreview();
+                        }
+                    }
+                });
+
+            } catch (Exception e) {
+                Log.e("Camera", "Failed to initialize back camera: " + e.getMessage(), e);
+                Toast.makeText(this, "后置摄像头初始化失败", Toast.LENGTH_SHORT).show();
+                if (isDualMode) {
+                    hidePipPreview();
+                } else {
+                    hideCameraPreview();
+                }
             }
+        };
+
+        // 如果需要等待前置相机释放，延迟300ms后再启动后置相机
+        if (needDelay) {
+            Log.d("Camera", "Delaying back camera start to wait for front camera release");
+            new Handler(Looper.getMainLooper()).postDelayed(startBackCamera, 300);
+        } else {
+            startBackCamera.run();
         }
     }
 
@@ -1284,10 +1321,18 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
 
         if (backCameraHelper != null) {
             backCameraHelper.stopBackRecording();
+            backCameraHelper.release();
+            backCameraHelper = null;
         }
 
-        // 隐藏画中画
-        hidePipPreview();
+        // 根据摄像头模式隐藏对应的预览
+        if (currentCameraMode == 2) {
+            // 双摄模式：隐藏画中画
+            hidePipPreview();
+        } else {
+            // 单后置模式：隐藏主预览
+            hideCameraPreview();
+        }
 
         backCameraActive = false;
         backCameraRecording = false;

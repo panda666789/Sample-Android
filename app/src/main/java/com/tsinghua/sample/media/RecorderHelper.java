@@ -53,13 +53,21 @@ public class RecorderHelper {
     private String currentFrontVideoPath;
     private String currentBackVideoPath;
 
-    public boolean isFlashlightOn = false;
+    // 双摄模式标志，用于控制闪光灯
+    private boolean isDualCameraMode = false;
 
     public RecorderHelper(CameraHelper cameraHelper, Context context) {
         this.cameraHelper = cameraHelper;
         this.context = context;
-        SharedPreferences sharedPreferences = context.getSharedPreferences("SettingsPrefs", MODE_PRIVATE);
-        isFlashlightOn = sharedPreferences.getBoolean("flashlight", false);
+    }
+
+    /**
+     * 设置双摄模式标志
+     * @param isDualMode true表示双摄模式，后置摄像头录制时会自动开启闪光灯
+     */
+    public void setDualCameraMode(boolean isDualMode) {
+        this.isDualCameraMode = isDualMode;
+        Log.d(TAG, "Dual camera mode set to: " + isDualMode);
     }
 
     private String generateTimestamp() {
@@ -183,6 +191,9 @@ public class RecorderHelper {
     }
 
     public void setupBackRecording() {
+        // 只在双摄模式下自动开启闪光灯
+        Log.d(TAG, "Back recording starting, dual camera mode: " + isDualCameraMode);
+
         startTimestamp = null;
         outputDirectory = null;
         frameDataBack.clear();
@@ -238,7 +249,8 @@ public class RecorderHelper {
                                         .createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
                                 builder.addTarget(backSurface);
                                 builder.addTarget(mediaRecorderBack.getSurface());
-                                builder.set(CaptureRequest.FLASH_MODE, isFlashlightOn ?
+                                // 只在双摄模式下自动开启闪光灯（TORCH模式）
+                                builder.set(CaptureRequest.FLASH_MODE, isDualCameraMode ?
                                         CaptureRequest.FLASH_MODE_TORCH : CaptureRequest.FLASH_MODE_OFF);
 
                                 session.setRepeatingRequest(builder.build(), new CameraCaptureSession.CaptureCallback() {

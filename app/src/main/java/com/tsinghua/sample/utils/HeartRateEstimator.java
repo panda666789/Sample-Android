@@ -98,7 +98,7 @@ public class HeartRateEstimator {
     private final Map<String, OnnxTensor> hrFeeds = new HashMap<>();
     //private WebSocketManager webSocketManager;
     private final List<Float> signalOutput = new ArrayList<>();
-    private final Deque<Long> timeStamps = new ArrayDeque<>(); // 存最近 300 帧的时间戳(毫秒)
+    private final Deque<Long> timeStamps = new ArrayDeque<>(); // 存最近 SIGNAL_BUFFER_SIZE 帧的时间戳(毫秒)
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -111,7 +111,10 @@ public class HeartRateEstimator {
     private final FloatBuffer dtBuffer = FloatBuffer.allocate(1);
     private OnnxTensor dtTensor = null;
 
-    private final float[] signalArray300 = new float[300];
+    // 信号缓冲区 - 不设上限，使用动态ArrayList
+    // 最小采样数：至少需要 MIN_SAMPLES 帧才能进行心率计算
+    private static final int MIN_SAMPLES = 300;  // 约10秒的数据
+    private static final int CALC_INTERVAL = 150; // 每90帧计算一次心率
 
     // 用于统计 FPS 的时间队列
     private final Deque<Long> frameTimes = new ArrayDeque<>();
@@ -165,24 +168,20 @@ public class HeartRateEstimator {
         for (int i = 0; i < 300; i++) {
             signalOutput.add(0f);
         }
-        welchCount = 300 - 240; // 初始化
+        welchCount = 0; // 初始化
     }
 
     public Float estimateFromFrame(float[][][] frame, long nowMs) throws Exception {
 
-        // 避免并发调用
-        if (!isRunning.compareAndSet(false, true)) {
-            return null;
-        }
 
-        Float hrResult = null;   // 本帧推断出的 HR；若未达到 300 帧窗口则保持 null
+
+        Float hrResult = null;   // 本帧推断出的 HR；若未达到缓冲窗口则保持 null
         float output    = 0f;    // 本帧瞬时信号输出
 
         try {
             /* ---------- 1. 更新时间戳 & 计算 Δt ---------- */
             timeStamps.addLast(nowMs);
             if (timeStamps.size() > 300) timeStamps.removeFirst();
-
             float dtSeconds = 1f / 30f;          // 默认假设 30 FPS
             if (timeStamps.size() > 1) {
                 Long[] ts = timeStamps.toArray(new Long[0]);
@@ -235,7 +234,7 @@ public class HeartRateEstimator {
                 lastResult = result;
             }
 
-            /* ---------- 6. 滤波、绘图、300 帧采样 ---------- */
+            /* ---------- 6. 滤波、绘图、信号缓冲 ---------- */
             output = (kfOutput == null) ? (kfOutput = new KalmanFilter1D(1f, 0.5f, output, 1f)).update(output)
                     : kfOutput.update(output);
 
@@ -247,7 +246,7 @@ public class HeartRateEstimator {
 
             welchCount++;
             if (signalOutput.size() == 300 && welchCount >= 300) {
-                welchCount = 270;                 // 重置计数
+                welchCount = 150;                 // 重置计数
                 hrResult   = estimateHRFromSignal(signalOutput);
 
                 // 通知监听器心率更新
@@ -273,65 +272,238 @@ public class HeartRateEstimator {
     }
 
 
+    /**
+     * 使用 Welch 功率谱密度方法计算心率
+     * 对应 Python: def get_hr(y, sr=30, min=30, max=180):
+     *     p, q = welch(y, sr, nfft=2e4, nperseg=np.min((len(y)-1, 256/30*sr)))
+     *     return p[(p>min/60)&(p<max/60)][np.argmax(q[(p>min/60)&(p<max/180)])]*60
+     */
     private float estimateHRFromSignal(List<Float> signal) throws Exception {
         final long t1 = System.nanoTime();
 
-        // 复制信号到复用数组
         final int size = signal.size();
+        double[] y = new double[size];
         for (int i = 0; i < size; i++) {
-            signalArray300[i] = signal.get(i);
+            y[i] = signal.get(i);
         }
 
-        // 做 Welch
-        try (OnnxTensor signalTensor = OnnxTensor.createTensor(
-                env,
-                FloatBuffer.wrap(signalArray300, 0, size),
-                new long[]{1, 1, size})
-        ) {
-            welchFeeds.clear();
-            welchFeeds.put("input", signalTensor);
+        // 计算实际采样率（基于时间戳）
+        double sr = 30.0;  // 默认30fps
+        if (timeStamps.size() >= 2) {
+            long firstMs = timeStamps.getFirst();
+            long lastMs = timeStamps.getLast();
+            double durationSec = (lastMs - firstMs) / 1000.0;
+            if (durationSec > 0) {
+                sr = (timeStamps.size() - 1) / durationSec;
+            }
+        }
 
-            try (OrtSession.Result psdResult = welchSession.run(welchFeeds)) {
-                float[] freqs = (float[]) ((OnnxTensor) psdResult.get("freqs").orElseThrow()).getValue();
-                float[] psd   = ((float[][]) ((OnnxTensor) psdResult.get("psd").orElseThrow()).getValue())[0];
+        Log.d("HeartRateEstimator", String.format("使用 %d 帧数据计算心率, 实际采样率: %.2f fps", size, sr));
 
-                // 调 HR session
-                try (OnnxTensor freqsTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(freqs), new long[]{freqs.length});
-                     OnnxTensor psdTensor   = OnnxTensor.createTensor(env, FloatBuffer.wrap(psd),   new long[]{1, psd.length})
-                ) {
-                    hrFeeds.clear();
-                    hrFeeds.put("freqs", freqsTensor);
-                    hrFeeds.put("psd", psdTensor);
+        // 去除均值（scipy.welch 默认 detrend='constant'）
+        double mean = 0;
+        for (double v : y) mean += v;
+        mean /= size;
+        for (int i = 0; i < size; i++) y[i] -= mean;
 
-                    try (OrtSession.Result hrResult = hrSession.run(hrFeeds)) {
-                        float hr = ((Number) ((OnnxTensor) hrResult.get("hr").orElseThrow()).getValue()).floatValue();
+        // Welch 参数 - 与 Python 完全一致
+        // nfft=2e4, nperseg=np.min((len(y)-1, 256/30*sr))
+        int nfft = 20000;  // 与 Python 一致
+        int nperseg = (int) Math.min(size - 1, 256.0 / 30.0 * sr);
+        nperseg = Math.max(nperseg, 64);  // 最小段长度
 
-                        // FPS修正逻辑暂时禁用 - 实测发现会导致心率被错误缩小
-                        // 原因：当AI处理较慢(~5fps)时，300帧覆盖60秒，修正系数=5/30≈0.167
-                        // 这会把正确的心率(如87)错误地缩小为约14
-                        // if (timeStamps.size() >= 300) {
-                        //     long firstMs = timeStamps.getFirst();
-                        //     long lastMs  = timeStamps.getLast();
-                        //     float durationSec = (lastMs - firstMs) / 1000f;
-                        //     if (durationSec > 0f) {
-                        //         float averageFps = 299f / durationSec;
-                        //         hr *= (averageFps / 30f);
-                        //     }
-                        // }
+        // 计算 Welch PSD（内部会将 nfft 调整为2的幂次）
+        double[][] welchResult = welchPSD(y, sr, nperseg, nfft);
+        double[] freqs = welchResult[0];
+        double[] psd = welchResult[1];
 
-                        // 卡尔曼滤波
-                        if (kfHR == null) {
-                            kfHR = new KalmanFilter1D(1f, 2f, hr, 1f);
-                        } else {
-                            hr = kfHR.update(hr);
-                        }
-                        final long t2 = System.nanoTime();
-                        Log.e("PROFILE", "计算心率耗时(ms): " + (t2 - t1) / 1e6);
-                        return hr;
-                    }
+        // 心率范围: 30-180 bpm -> 0.5-3.0 Hz
+        double minFreq = 30.0 / 60.0;  // 0.5 Hz
+        double maxFreq = 180.0 / 60.0; // 3.0 Hz
+
+        // 找到心率范围内的最大峰值
+        double maxPower = -1;
+        double peakFreq = 0;
+        for (int i = 0; i < freqs.length; i++) {
+            if (freqs[i] > minFreq && freqs[i] < maxFreq) {
+                if (psd[i] > maxPower) {
+                    maxPower = psd[i];
+                    peakFreq = freqs[i];
                 }
             }
         }
+
+        float hr = (float) (peakFreq * 60.0);  // 转换为 BPM
+
+        Log.d("HeartRateEstimator", String.format("Welch计算结果: 峰值频率=%.4f Hz, 心率=%.1f bpm", peakFreq, hr));
+
+        // 卡尔曼滤波平滑
+        if (kfHR == null) {
+            kfHR = new KalmanFilter1D(1f, 2f, hr, 1f);
+        } else {
+            hr = kfHR.update(hr);
+        }
+
+        final long t2 = System.nanoTime();
+        Log.d("HeartRateEstimator", String.format("计算心率耗时: %.2f ms", (t2 - t1) / 1e6));
+
+        return hr;
+    }
+
+    /**
+     * Welch 功率谱密度估计
+     * @param signal 输入信号
+     * @param fs 采样频率
+     * @param nperseg 每段长度
+     * @param nfftRequested 请求的 FFT 点数（会调整为2的幂次）
+     * @return [频率数组, PSD数组]
+     */
+    private double[][] welchPSD(double[] signal, double fs, int nperseg, int nfftRequested) {
+        // FFT 需要 2 的幂次，向上取整
+        int nfft = nextPowerOf2(Math.max(nfftRequested, nperseg));
+
+        int noverlap = nperseg / 2;  // 50% 重叠（scipy 默认）
+        int step = nperseg - noverlap;
+
+        // 计算段数
+        int nSegments = Math.max(1, (signal.length - noverlap) / step);
+
+        // Hann 窗（scipy 默认）
+        double[] window = hannWindow(nperseg);
+        double windowSum = 0;
+        for (double w : window) windowSum += w * w;
+
+        // 输出频率点数（单边谱）
+        int nFreqs = nfft / 2 + 1;
+        double[] psdSum = new double[nFreqs];
+        int actualSegments = 0;
+
+        // 对每段计算周期图并累加
+        for (int seg = 0; seg < nSegments; seg++) {
+            int start = seg * step;
+            if (start + nperseg > signal.length) break;
+
+            // 提取段并应用窗函数，补零到 nfft
+            double[] segmentReal = new double[nfft];
+            double[] segmentImag = new double[nfft];
+            for (int i = 0; i < nperseg; i++) {
+                segmentReal[i] = signal[start + i] * window[i];
+            }
+            // 剩余部分已经是0（补零）
+
+            // 计算 FFT
+            fft(segmentReal, segmentImag);
+
+            // 计算功率谱密度（单边）
+            for (int i = 0; i < nFreqs; i++) {
+                double power = (segmentReal[i] * segmentReal[i] + segmentImag[i] * segmentImag[i]);
+                // scipy 的 scaling='density' 归一化
+                power /= (fs * windowSum);
+                if (i > 0 && i < nfft / 2) {
+                    power *= 2;  // 单边谱，除 DC 和 Nyquist 外乘2
+                }
+                psdSum[i] += power;
+            }
+            actualSegments++;
+        }
+
+        // 平均所有段
+        if (actualSegments > 0) {
+            for (int i = 0; i < nFreqs; i++) {
+                psdSum[i] /= actualSegments;
+            }
+        }
+
+        // 生成频率数组
+        double[] freqs = new double[nFreqs];
+        for (int i = 0; i < nFreqs; i++) {
+            freqs[i] = i * fs / nfft;
+        }
+
+        Log.d("HeartRateEstimator", String.format("Welch: nfft=%d, nperseg=%d, segments=%d, freqRes=%.4f Hz",
+                nfft, nperseg, actualSegments, fs / nfft));
+
+        return new double[][]{freqs, psdSum};
+    }
+
+    /**
+     * Hann 窗函数
+     */
+    private double[] hannWindow(int length) {
+        double[] window = new double[length];
+        for (int i = 0; i < length; i++) {
+            window[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (length - 1)));
+        }
+        return window;
+    }
+
+    /**
+     * 快速傅里叶变换 (Cooley-Tukey 算法)
+     * 输入输出都是实部和虚部数组
+     */
+    private void fft(double[] real, double[] imag) {
+        int n = real.length;
+
+        // 位反转排列
+        int bits = (int) (Math.log(n) / Math.log(2));
+        for (int i = 0; i < n; i++) {
+            int j = bitReverse(i, bits);
+            if (j > i) {
+                double tempR = real[i];
+                double tempI = imag[i];
+                real[i] = real[j];
+                imag[i] = imag[j];
+                real[j] = tempR;
+                imag[j] = tempI;
+            }
+        }
+
+        // Cooley-Tukey FFT
+        for (int size = 2; size <= n; size *= 2) {
+            int halfSize = size / 2;
+            double angle = -2 * Math.PI / size;
+
+            for (int i = 0; i < n; i += size) {
+                for (int j = 0; j < halfSize; j++) {
+                    double wr = Math.cos(angle * j);
+                    double wi = Math.sin(angle * j);
+
+                    int idx1 = i + j;
+                    int idx2 = i + j + halfSize;
+
+                    double tr = wr * real[idx2] - wi * imag[idx2];
+                    double ti = wr * imag[idx2] + wi * real[idx2];
+
+                    real[idx2] = real[idx1] - tr;
+                    imag[idx2] = imag[idx1] - ti;
+                    real[idx1] = real[idx1] + tr;
+                    imag[idx1] = imag[idx1] + ti;
+                }
+            }
+        }
+    }
+
+    /**
+     * 位反转
+     */
+    private int bitReverse(int x, int bits) {
+        int result = 0;
+        for (int i = 0; i < bits; i++) {
+            result = (result << 1) | (x & 1);
+            x >>= 1;
+        }
+        return result;
+    }
+
+    /**
+     * 获取大于等于 n 的最小 2 的幂次
+     */
+    private int nextPowerOf2(int n) {
+        int power = 1;
+        while (power < n) {
+            power *= 2;
+        }
+        return power;
     }
 
     // 如果需要调试，可视化当前输入帧图像

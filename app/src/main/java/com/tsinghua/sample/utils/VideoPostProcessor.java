@@ -59,8 +59,7 @@ public class VideoPostProcessor {
     private static final float TARGET_FPS = 30f;
     private static final long FRAME_INTERVAL_US = (long) (1_000_000 / TARGET_FPS);  // 微秒
 
-    // 最大处理帧数（防止超长视频导致OOM）
-    private static final int MAX_FRAMES = 600;  // 约20秒@30fps
+    // 不再限制帧数，改用流式处理避免OOM
 
     private final Context context;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -179,71 +178,71 @@ public class VideoPostProcessor {
                 frontDir  // 日志输出到front目录
         );
 
-        // 3. 解码视频并处理帧
-        notifyProgress(listener, 10, 100, "解码视频...");
-        List<FrameData> frames = decodeVideoUniformly(videoPath, listener);
+        // 3. 流式处理：边解码边处理，避免存储所有帧导致OOM
+        notifyProgress(listener, 10, 100, "开始处理视频...");
+
+        List<RectF> facePositions = new ArrayList<>();
+        List<Float> faceAreas = new ArrayList<>();
+        List<Float> heartRateValues = new ArrayList<>();
+        int[] frameCounters = new int[2];  // [0]=totalFrames, [1]=validFrames
+
+        // 流式处理回调
+        FrameProcessor frameProcessor = (bitmap, timestampMs, frameIndex, totalFrames) -> {
+            if (isCancelled) return;
+
+            int progress = 10 + (int) ((frameIndex + 1) * 80.0 / totalFrames);
+            notifyProgress(listener, progress, 100,
+                    String.format(Locale.US, "处理帧 %d/%d", frameIndex + 1, totalFrames));
+
+            frameCounters[0] = totalFrames;
+
+            try {
+                // 人脸检测
+                FaceDetectionResult faceResult = detectFace(bitmap);
+
+                if (faceResult != null && faceResult.bounds != null) {
+                    frameCounters[1]++;
+                    facePositions.add(faceResult.bounds);
+                    faceAreas.add(calculateFaceArea(faceResult.bounds));
+
+                    // 预处理人脸区域
+                    float[][][] faceFrame = preprocessFace(bitmap, faceResult.bounds);
+
+                    if (faceFrame != null) {
+                        // AI推理
+                        Float hr = heartRateEstimator.estimateFromFrame(faceFrame, timestampMs);
+                        if (hr != null) {
+                            heartRateValues.add(hr);
+                            Log.d(TAG, "帧 " + frameIndex + " 心率: " + hr);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "帧处理失败: " + frameIndex, e);
+            } finally {
+                // 立即回收bitmap
+                if (bitmap != null && !bitmap.isRecycled()) {
+                    bitmap.recycle();
+                }
+            }
+        };
+
+        // 执行流式解码和处理
+        boolean success = decodeAndProcessVideo(videoPath, listener, frameProcessor);
 
         if (isCancelled) {
             result.errorMessage = "用户取消";
             return;
         }
 
-        if (frames.isEmpty()) {
+        if (!success || frameCounters[0] == 0) {
             result.errorMessage = "无法解码视频帧";
             notifyError(listener, "无法解码视频帧");
             return;
         }
 
-        result.totalFrames = frames.size();
-
-        // 4. 处理每一帧（人脸检测 + AI推理）
-        List<RectF> facePositions = new ArrayList<>();
-        List<Float> faceAreas = new ArrayList<>();
-        int validFrameCount = 0;
-        float lastHeartRate = 0f;
-
-        for (int i = 0; i < frames.size(); i++) {
-            if (isCancelled) {
-                result.errorMessage = "用户取消";
-                return;
-            }
-
-            FrameData frame = frames.get(i);
-            int progress = 10 + (int) ((i + 1) * 80.0 / frames.size());
-            notifyProgress(listener, progress, 100,
-                    String.format(Locale.US, "处理帧 %d/%d", i + 1, frames.size()));
-
-            try {
-                // 人脸检测
-                FaceDetectionResult faceResult = detectFace(frame.bitmap);
-
-                if (faceResult != null && faceResult.bounds != null) {
-                    validFrameCount++;
-                    facePositions.add(faceResult.bounds);
-                    faceAreas.add(calculateFaceArea(faceResult.bounds));
-
-                    // 预处理人脸区域
-                    float[][][] faceFrame = preprocessFace(frame.bitmap, faceResult.bounds);
-
-                    if (faceFrame != null) {
-                        // AI推理
-                        Float hr = heartRateEstimator.estimateFromFrame(faceFrame, frame.timestampMs);
-                        if (hr != null) {
-                            lastHeartRate = hr;
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "帧处理失败: " + i, e);
-            } finally {
-                // 及时回收bitmap
-                if (frame.bitmap != null && !frame.bitmap.isRecycled()) {
-                    frame.bitmap.recycle();
-                }
-            }
-        }
-
-        frames.clear();  // 清理列表
+        result.totalFrames = frameCounters[0];
+        int validFrameCount = frameCounters[1];
 
         // 5. 计算质量指标
         result.validFrames = validFrameCount;
@@ -262,8 +261,17 @@ public class VideoPostProcessor {
         // 计算位置稳定性
         result.positionStability = calculatePositionStability(facePositions);
 
-        // AI心率
-        result.aiHeartRate = lastHeartRate;
+        // AI心率 - 使用所有计算结果的平均值
+        if (!heartRateValues.isEmpty()) {
+            float sum = 0f;
+            for (Float hr : heartRateValues) {
+                sum += hr;
+            }
+            result.aiHeartRate = sum / heartRateValues.size();
+            Log.d(TAG, "心率计算次数: " + heartRateValues.size() + ", 平均心率: " + result.aiHeartRate);
+        } else {
+            result.aiHeartRate = 0f;
+        }
 
         // 6. 读取血氧仪心率数据
         notifyProgress(listener, 92, 100, "读取血氧仪数据...");
@@ -375,8 +383,149 @@ public class VideoPostProcessor {
     }
 
     /**
-     * 均匀解码视频帧
+     * 帧处理回调接口
      */
+    private interface FrameProcessor {
+        void process(Bitmap bitmap, long timestampMs, int frameIndex, int totalFrames);
+    }
+
+    /**
+     * 流式解码并处理视频（边解码边处理，避免OOM）
+     */
+    private boolean decodeAndProcessVideo(String videoPath, OnProgressListener listener, FrameProcessor processor) {
+        MediaExtractor extractor = new MediaExtractor();
+        MediaCodec decoder = null;
+
+        try {
+            extractor.setDataSource(videoPath);
+
+            // 找到视频轨道
+            int videoTrackIndex = -1;
+            MediaFormat format = null;
+            for (int i = 0; i < extractor.getTrackCount(); i++) {
+                MediaFormat trackFormat = extractor.getTrackFormat(i);
+                String mime = trackFormat.getString(MediaFormat.KEY_MIME);
+                if (mime != null && mime.startsWith("video/")) {
+                    videoTrackIndex = i;
+                    format = trackFormat;
+                    break;
+                }
+            }
+
+            if (videoTrackIndex < 0 || format == null) {
+                Log.e(TAG, "找不到视频轨道");
+                return false;
+            }
+
+            extractor.selectTrack(videoTrackIndex);
+
+            // 获取视频信息
+            String mime = format.getString(MediaFormat.KEY_MIME);
+            int width = format.getInteger(MediaFormat.KEY_WIDTH);
+            int height = format.getInteger(MediaFormat.KEY_HEIGHT);
+            long durationUs = format.getLong(MediaFormat.KEY_DURATION);
+
+            // 获取视频旋转角度
+            int rotation = 0;
+            if (format.containsKey(MediaFormat.KEY_ROTATION)) {
+                rotation = format.getInteger(MediaFormat.KEY_ROTATION);
+            }
+
+            Log.d(TAG, String.format("视频信息: %dx%d, 时长: %.2f秒, 旋转: %d度",
+                    width, height, durationUs / 1_000_000.0, rotation));
+
+            // 创建解码器
+            decoder = MediaCodec.createDecoderByType(mime);
+            decoder.configure(format, null, null, 0);
+            decoder.start();
+
+            // 计算总帧数（不再限制）
+            int totalFrameCount = (int) (durationUs / FRAME_INTERVAL_US);
+            long sampleIntervalUs = durationUs / totalFrameCount;
+            final int videoRotation = rotation;
+
+            Log.d(TAG, String.format("预计处理帧数: %d", totalFrameCount));
+
+            MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
+            boolean inputDone = false;
+            boolean outputDone = false;
+            long nextSampleTimeUs = 0;
+            int processedFrames = 0;
+
+            while (!outputDone && !isCancelled) {
+                // 输入数据
+                if (!inputDone) {
+                    int inputBufferIndex = decoder.dequeueInputBuffer(10000);
+                    if (inputBufferIndex >= 0) {
+                        ByteBuffer inputBuffer = decoder.getInputBuffer(inputBufferIndex);
+                        int sampleSize = extractor.readSampleData(inputBuffer, 0);
+
+                        if (sampleSize < 0) {
+                            decoder.queueInputBuffer(inputBufferIndex, 0, 0, 0,
+                                    MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                            inputDone = true;
+                        } else {
+                            long presentationTimeUs = extractor.getSampleTime();
+                            decoder.queueInputBuffer(inputBufferIndex, 0, sampleSize,
+                                    presentationTimeUs, 0);
+                            extractor.advance();
+                        }
+                    }
+                }
+
+                // 输出数据
+                int outputBufferIndex = decoder.dequeueOutputBuffer(bufferInfo, 10000);
+                if (outputBufferIndex >= 0) {
+                    long currentTimeUs = bufferInfo.presentationTimeUs;
+
+                    if (currentTimeUs >= nextSampleTimeUs) {
+                        // 获取帧数据并转换为Bitmap
+                        Image image = decoder.getOutputImage(outputBufferIndex);
+                        if (image != null) {
+                            Bitmap bitmap = imageToBitmap(image, width, height, videoRotation);
+                            if (bitmap != null) {
+                                // 立即处理此帧
+                                processor.process(bitmap, currentTimeUs / 1000, processedFrames, totalFrameCount);
+                                processedFrames++;
+                            }
+                            image.close();
+                        }
+                        nextSampleTimeUs += sampleIntervalUs;
+                    }
+
+                    decoder.releaseOutputBuffer(outputBufferIndex, false);
+
+                    if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                        outputDone = true;
+                    }
+                } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    Log.d(TAG, "输出格式变化");
+                }
+            }
+
+            Log.d(TAG, String.format("处理完成，共 %d 帧", processedFrames));
+            return processedFrames > 0;
+
+        } catch (Exception e) {
+            Log.e(TAG, "视频解码失败", e);
+            return false;
+        } finally {
+            if (decoder != null) {
+                try {
+                    decoder.stop();
+                    decoder.release();
+                } catch (Exception e) {
+                    Log.w(TAG, "释放解码器失败", e);
+                }
+            }
+            extractor.release();
+        }
+    }
+
+    /**
+     * 均匀解码视频帧（保留旧方法以备用）
+     */
+    @Deprecated
     private List<FrameData> decodeVideoUniformly(String videoPath, OnProgressListener listener) {
         List<FrameData> frames = new ArrayList<>();
         MediaExtractor extractor = new MediaExtractor();
@@ -426,7 +575,7 @@ public class VideoPostProcessor {
             decoder.start();
 
             // 均匀采样
-            int targetFrameCount = Math.min((int) (durationUs / FRAME_INTERVAL_US), MAX_FRAMES);
+            int targetFrameCount = (int) (durationUs / FRAME_INTERVAL_US);
             long sampleIntervalUs = durationUs / targetFrameCount;
             final int videoRotation = rotation;  // 用于lambda表达式
 
@@ -436,7 +585,7 @@ public class VideoPostProcessor {
             long nextSampleTimeUs = 0;
             int extractedFrames = 0;
 
-            while (!outputDone && !isCancelled && frames.size() < MAX_FRAMES) {
+            while (!outputDone && !isCancelled) {
                 // 输入数据
                 if (!inputDone) {
                     int inputBufferIndex = decoder.dequeueInputBuffer(10000);
@@ -615,35 +764,44 @@ public class VideoPostProcessor {
     }
 
     /**
-     * 计算人脸边界框
+     * 计算人脸边界框（只包含脸部，不包含脖子和肩膀）
+     * 使用 FaceMesh 的脸部轮廓关键点
      */
     private RectF calculateBoundingBox(List<LandmarkProto.NormalizedLandmark> landmarks) {
-        LandmarkProto.NormalizedLandmark leftEye = landmarks.get(33);
-        LandmarkProto.NormalizedLandmark rightEye = landmarks.get(263);
-        LandmarkProto.NormalizedLandmark chin = landmarks.get(152);
-        LandmarkProto.NormalizedLandmark noseTip = landmarks.get(1);
+        // FaceMesh 关键点索引：
+        // 10: 额头顶部中心
+        // 152: 下巴底部
+        // 234: 左脸颊边缘
+        // 454: 右脸颊边缘
+        // 33: 左眼外角
+        // 263: 右眼外角
 
-        float eyeCenterX = (leftEye.getX() + rightEye.getX()) / 2f;
-        float eyeCenterY = (leftEye.getY() + rightEye.getY()) / 2f;
+        LandmarkProto.NormalizedLandmark forehead = landmarks.get(10);   // 额头
+        LandmarkProto.NormalizedLandmark chin = landmarks.get(152);      // 下巴
+        LandmarkProto.NormalizedLandmark leftCheek = landmarks.get(234); // 左脸颊
+        LandmarkProto.NormalizedLandmark rightCheek = landmarks.get(454);// 右脸颊
 
-        float faceHeight = (chin.getY() - eyeCenterY) * 2.0f;
+        // 计算脸部边界（添加少量边距）
+        float padding = 0.02f;  // 2% 边距
 
-        float centerX = (eyeCenterX + noseTip.getX()) / 2f;
-        float centerY = eyeCenterY + faceHeight * 0.4f;
+        float minX = Math.min(leftCheek.getX(), rightCheek.getX()) - padding;
+        float maxX = Math.max(leftCheek.getX(), rightCheek.getX()) + padding;
+        float minY = forehead.getY() - padding;
+        float maxY = chin.getY() + padding * 0.5f;  // 下巴边距小一点，避免包含脖子
 
-        float boxSize = faceHeight * 1.5f;
-        float halfBox = boxSize / 2f;
-
-        float minX = Math.max(0f, centerX - halfBox);
-        float minY = Math.max(0f, centerY - halfBox);
-        float maxX = Math.min(1f, centerX + halfBox);
-        float maxY = Math.min(1f, centerY + halfBox);
+        // 边界检查
+        minX = Math.max(0f, minX);
+        minY = Math.max(0f, minY);
+        maxX = Math.min(1f, maxX);
+        maxY = Math.min(1f, maxY);
 
         return new RectF(minX, minY, maxX, maxY);
     }
 
     /**
      * 预处理人脸区域
+     * 注意：bitmap 已经在 imageToBitmap 中旋转过了，FaceMesh 坐标是基于旋转后的图像
+     * 所以这里直接用坐标裁剪，不需要额外旋转
      */
     private float[][][] preprocessFace(Bitmap bitmap, RectF bounds) {
         try {
@@ -656,6 +814,7 @@ public class VideoPostProcessor {
             int w = Math.round((bounds.right - bounds.left) * width);
             int h = Math.round((bounds.bottom - bounds.top) * height);
 
+            // 边界检查
             x = Math.max(0, Math.min(x, width - 1));
             y = Math.max(0, Math.min(y, height - 1));
             w = Math.min(w, width - x);
