@@ -10,6 +10,13 @@
         android:layout_height="wrap_content"
         android:text="是否开启推理" />
 
+    <Switch
+        android:id="@+id/switchQualityEvaluation"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="是否开启视频质量评估" />
+
     <RadioGroup
         android:id="@+id/radioGroupFormat"
         android:layout_width="wrap_content"

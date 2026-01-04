@@ -13,6 +13,7 @@ import com.tsinghua.sample.R;
 
 public class FrontCameraSettingsActivity extends AppCompatActivity {
     private Switch switchInference;
+    private Switch switchQualityEvaluation;
     private RadioGroup radioGroupFormat;
     private RadioButton radioMp4;
     private RadioButton radioAvi;
@@ -27,6 +28,7 @@ public class FrontCameraSettingsActivity extends AppCompatActivity {
 
         // 初始化视图
         switchInference = findViewById(R.id.switchInference);
+        switchQualityEvaluation = findViewById(R.id.switchQualityEvaluation);
         radioGroupFormat = findViewById(R.id.radioGroupFormat);
         radioMp4 = findViewById(R.id.radioMp4);
         radioAvi = findViewById(R.id.radioAvi);
@@ -37,10 +39,12 @@ public class FrontCameraSettingsActivity extends AppCompatActivity {
         // 读取缓存
         SharedPreferences prefs = getSharedPreferences("AppSettings", MODE_PRIVATE);
         boolean enabled = prefs.getBoolean("enable_inference", false);
+        boolean qualityEvaluationEnabled = prefs.getBoolean("enable_quality_evaluation", true);
         String format = prefs.getString("video_format", "mp4");
 
         // 应用到视图
         switchInference.setChecked(enabled);
+        switchQualityEvaluation.setChecked(qualityEvaluationEnabled);
         radioGroupFormat.setVisibility(enabled ? RadioGroup.VISIBLE : RadioGroup.GONE);
         if ("avi".equals(format)) {
             radioAvi.setChecked(true);
@@ -56,6 +60,13 @@ public class FrontCameraSettingsActivity extends AppCompatActivity {
             radioGroupFormat.setVisibility(isChecked ? RadioGroup.VISIBLE : RadioGroup.GONE);
             prefs.edit()
                     .putBoolean("enable_inference", isChecked)
+                    .apply();
+        });
+
+        // 监听切换质量评估开关
+        switchQualityEvaluation.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            prefs.edit()
+                    .putBoolean("enable_quality_evaluation", isChecked)
                     .apply();
         });
 

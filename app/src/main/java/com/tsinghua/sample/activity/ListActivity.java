@@ -828,9 +828,14 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
                     final String finalFrontDir = frontDir;
                     final String finalSpo2Dir = spo2Dir;
 
-                    // 判断是否需要后处理
+                    // 判断是否需要后处理（且质量评估已启用）
+                    SharedPreferences autoStopPrefs = getSharedPreferences("AppSettings", MODE_PRIVATE);
+                    boolean qualityEvalEnabled = autoStopPrefs.getBoolean("enable_quality_evaluation", true);
                     boolean needPostProcess = (currentCameraMode == 0 || currentCameraMode == 2)
-                                              && finalVideoPath != null;
+                                              && finalVideoPath != null
+                                              && qualityEvalEnabled;
+                    Log.d("ListActivity", "autoStopCallback: qualityEvalEnabled=" + qualityEvalEnabled
+                          + ", needPostProcess=" + needPostProcess);
 
                     // 停止摄像头录制
                     stopFrontCameraRecording();
@@ -982,11 +987,15 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
         final String finalFrontDir = frontDir;
         final String finalSpo2Dir = spo2Dir;
 
-        // 判断是否需要后处理（前置摄像头模式或双摄模式）
+        // 判断是否需要后处理（前置摄像头模式或双摄模式，且质量评估已启用）
+        SharedPreferences prefs = getSharedPreferences("AppSettings", MODE_PRIVATE);
+        boolean qualityEvaluationEnabled = prefs.getBoolean("enable_quality_evaluation", true);
         boolean needPostProcess = (currentCameraMode == 0 || currentCameraMode == 2)
-                                  && finalVideoPath != null;
+                                  && finalVideoPath != null
+                                  && qualityEvaluationEnabled;
 
         Log.d("ListActivity", "stopAllRecording: videoPath=" + finalVideoPath
+              + ", qualityEvaluationEnabled=" + qualityEvaluationEnabled
               + ", needPostProcess=" + needPostProcess);
 
         stopFrontCameraRecording();

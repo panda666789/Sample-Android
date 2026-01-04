@@ -119,6 +119,9 @@ public class CameraFaceProcessor {
     // 视频编码线程池（独立于文件写入）
     private final ExecutorService videoEncoderExecutor = Executors.newSingleThreadExecutor();
     private com.tsinghua.sample.utils.PlotView plotView;
+
+    // 视频质量评估是否启用
+    private boolean qualityEvaluationEnabled = true;
     public interface CameraFaceProcessorCallback {
         void onCameraStarted();
         void onCameraStopped();
@@ -318,17 +321,21 @@ public class CameraFaceProcessor {
             muxerStarted = false;
         }
 
-        // 计算并回调视频质量评估结果
-        Log.i(TAG, "releaseVideoEncoder: 开始计算质量评估, facePreProcessor=" + facePreProcessor);
-        if (facePreProcessor != null) {
-            VideoQualityEvaluator.QualityResult result = facePreProcessor.evaluateQuality();
-            Log.i(TAG, "视频质量评估完成:\n" + result.toString());
-            Log.i(TAG, "qualityResultListener=" + qualityResultListener);
-            if (qualityResultListener != null) {
-                mainHandler.post(() -> qualityResultListener.onQualityResult(result));
+        // 计算并回调视频质量评估结果（仅在启用时）
+        if (qualityEvaluationEnabled) {
+            Log.i(TAG, "releaseVideoEncoder: 开始计算质量评估, facePreProcessor=" + facePreProcessor);
+            if (facePreProcessor != null) {
+                VideoQualityEvaluator.QualityResult result = facePreProcessor.evaluateQuality();
+                Log.i(TAG, "视频质量评估完成:\n" + result.toString());
+                Log.i(TAG, "qualityResultListener=" + qualityResultListener);
+                if (qualityResultListener != null) {
+                    mainHandler.post(() -> qualityResultListener.onQualityResult(result));
+                }
+            } else {
+                Log.w(TAG, "releaseVideoEncoder: facePreProcessor为null，无法评估质量");
             }
         } else {
-            Log.w(TAG, "releaseVideoEncoder: facePreProcessor为null，无法评估质量");
+            Log.i(TAG, "releaseVideoEncoder: 视频质量评估已禁用，跳过评估");
         }
     }
 
@@ -546,6 +553,8 @@ public class CameraFaceProcessor {
             return;
         }
         SharedPreferences prefs = activity.getSharedPreferences("AppSettings", Context.MODE_PRIVATE);
+        qualityEvaluationEnabled = prefs.getBoolean("enable_quality_evaluation", true);
+        Log.d(TAG, "视频质量评估功能: " + (qualityEvaluationEnabled ? "已启用" : "已禁用"));
         String experimentId = prefs.getString("experiment_id", "default");
         final String baseDir = Environment
                 .getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
@@ -595,6 +604,7 @@ public class CameraFaceProcessor {
                     }
 
                     facePreProcessor = new FacePreprocessor(activity, heartRateEstimator);
+                    facePreProcessor.setQualityEvaluationEnabled(qualityEvaluationEnabled);
                     isInitialized = true;
 
                     long loadTime = System.currentTimeMillis() - startTime;
@@ -831,6 +841,7 @@ public class CameraFaceProcessor {
                 estimator.setOnHeartRateListener(heartRateListener);
             }
             facePreProcessor = new FacePreprocessor(activity, heartRateEstimator);
+            facePreProcessor.setQualityEvaluationEnabled(qualityEvaluationEnabled);
             isInitialized = true;
         }
     }

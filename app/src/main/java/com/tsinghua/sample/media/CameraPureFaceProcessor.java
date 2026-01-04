@@ -134,6 +134,9 @@ public class CameraPureFaceProcessor {
     private static final int AI_PROCESS_INTERVAL = 2;  // 每2帧处理1次AI，约20秒输出第一个心率
     private int frameIndex = 0;
 
+    // 视频质量评估是否启用
+    private boolean qualityEvaluationEnabled = true;
+
     // AI处理同步控制（防止回调堆积）
     private volatile Bitmap pendingBitmap = null;  // 待处理的bitmap
     private final Object bitmapLock = new Object();
@@ -798,11 +801,15 @@ public class CameraPureFaceProcessor {
             return;
         }
 
+        // 读取质量评估开关设置
+        SharedPreferences prefs = activity.getSharedPreferences("AppSettings", Context.MODE_PRIVATE);
+        qualityEvaluationEnabled = prefs.getBoolean("enable_quality_evaluation", true);
+        Log.d(TAG, "视频质量评估功能: " + (qualityEvaluationEnabled ? "已启用" : "已禁用"));
+
         // 重置质量评估器和帧计数
         resetQualityEvaluator();
         frameIndex = 0;
 
-        SharedPreferences prefs = activity.getSharedPreferences("AppSettings", Context.MODE_PRIVATE);
         String experimentId = prefs.getString("experiment_id", "default");
 
         // 使用 SessionManager 获取 front 目录，让 hr_log.csv 与视频放在一起
@@ -860,6 +867,7 @@ public class CameraPureFaceProcessor {
                     }
 
                     facePreProcessor = new FacePreprocessor(activity, heartRateEstimator);
+                    facePreProcessor.setQualityEvaluationEnabled(qualityEvaluationEnabled);
                     isInitialized = true;
 
                     long loadTime = System.currentTimeMillis() - startTime;
@@ -940,21 +948,25 @@ public class CameraPureFaceProcessor {
             imageReader = null;
         }
 
-        // 计算并回调视频质量评估结果
-        Log.i(TAG, "stopCamera: 开始计算质量评估, facePreProcessor=" + facePreProcessor);
-        if (facePreProcessor != null) {
-            VideoQualityEvaluator.QualityResult result = facePreProcessor.evaluateQuality();
-            Log.i(TAG, "视频质量评估完成:\n" + result.toString());
+        // 计算并回调视频质量评估结果（仅在启用时）
+        if (qualityEvaluationEnabled) {
+            Log.i(TAG, "stopCamera: 开始计算质量评估, facePreProcessor=" + facePreProcessor);
+            if (facePreProcessor != null) {
+                VideoQualityEvaluator.QualityResult result = facePreProcessor.evaluateQuality();
+                Log.i(TAG, "视频质量评估完成:\n" + result.toString());
 
-            // 将质量评估报告写入 txt 文件
-            saveQualityReportToFile(result);
+                // 将质量评估报告写入 txt 文件
+                saveQualityReportToFile(result);
 
-            Log.i(TAG, "qualityResultListener=" + qualityResultListener);
-            if (qualityResultListener != null) {
-                mainHandler.post(() -> qualityResultListener.onQualityResult(result));
+                Log.i(TAG, "qualityResultListener=" + qualityResultListener);
+                if (qualityResultListener != null) {
+                    mainHandler.post(() -> qualityResultListener.onQualityResult(result));
+                }
+            } else {
+                Log.w(TAG, "stopCamera: facePreProcessor为null，无法评估质量");
             }
         } else {
-            Log.w(TAG, "stopCamera: facePreProcessor为null，无法评估质量");
+            Log.i(TAG, "stopCamera: 视频质量评估已禁用，跳过评估");
         }
 
         if (callback != null) {
@@ -1127,6 +1139,7 @@ public class CameraPureFaceProcessor {
                 estimator.setOnHeartRateListener(heartRateListener);
             }
             facePreProcessor = new FacePreprocessor(activity, heartRateEstimator);
+            facePreProcessor.setQualityEvaluationEnabled(qualityEvaluationEnabled);
             isInitialized = true;
         }
     }

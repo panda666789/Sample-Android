@@ -49,6 +49,7 @@ public class FacePreprocessor {
     // 视频质量评估器
     private final VideoQualityEvaluator qualityEvaluator = new VideoQualityEvaluator();
     private RectF lastValidBounds = null;  // 用于计算亮度的边界框缓存
+    private boolean qualityEvaluationEnabled = true;  // 质量评估是否启用
     public interface OnDetectionFailListener {
         void onTooManyInvalidFrames();  // 连续无效帧触发回调
     }
@@ -56,6 +57,20 @@ public class FacePreprocessor {
 
     public void setOnDetectionFailListener(OnDetectionFailListener listener) {
         this.detectionFailListener = listener;
+    }
+
+    /**
+     * 设置质量评估是否启用
+     */
+    public void setQualityEvaluationEnabled(boolean enabled) {
+        this.qualityEvaluationEnabled = enabled;
+    }
+
+    /**
+     * 获取质量评估是否启用
+     */
+    public boolean isQualityEvaluationEnabled() {
+        return qualityEvaluationEnabled;
     }
 
     /**
@@ -183,8 +198,10 @@ public class FacePreprocessor {
                 if (isAllZero(currentFrame)) {
                     invalidFrameCount++;
                     Log.w(TAG, "第 " + invalidFrameCount + " 帧无效（无人脸）");
-                    // 质量评估：无人脸帧
-                    qualityEvaluator.updateFrame(false, null);
+                    // 质量评估：无人脸帧（仅在启用时更新）
+                    if (qualityEvaluationEnabled) {
+                        qualityEvaluator.updateFrame(false, null);
+                    }
                     if (invalidFrameCount >= MAX_INVALID_FRAMES) {
                         invalidFrameCount = 0;  // 重置防止重复触发
                         new Handler(context.getMainLooper()).post(() -> {
@@ -197,8 +214,10 @@ public class FacePreprocessor {
                 } else {
                     // ✅ 检测到了人脸，重置计数器
                     invalidFrameCount = 0;
-                    // 质量评估：有人脸帧，传入归一化边界框
-                    qualityEvaluator.updateFrame(true, lastValidBounds);
+                    // 质量评估：有人脸帧，传入归一化边界框（仅在启用时更新）
+                    if (qualityEvaluationEnabled) {
+                        qualityEvaluator.updateFrame(true, lastValidBounds);
+                    }
                 }
                 heartRateEstimator.estimateFromFrame(currentFrame,nowMs);
 
