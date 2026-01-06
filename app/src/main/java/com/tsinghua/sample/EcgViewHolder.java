@@ -151,12 +151,16 @@ public class EcgViewHolder extends RecyclerView.ViewHolder {
             @Override
             public void onConnected(Device d) {
                 currentDevice = d;
-                renderConnectedDevice(d);
             }
 
             @Override
             public void onDeviceReady(Device d) {
                 statusText.setText("已连接");
+                // 记录最近一次成功连接的心电设备MAC（用于“一键连接”）
+                ctx.getSharedPreferences("AppSettings", Context.MODE_PRIVATE)
+                        .edit()
+                        .putString("last_connected_ecg_mac", d.getId())
+                        .apply();
             }
         });
     }
@@ -216,7 +220,7 @@ public class EcgViewHolder extends RecyclerView.ViewHolder {
     private void startManualMeasurement() {
         SharedPreferences prefs = ctx.getSharedPreferences("AppSettings", Context.MODE_PRIVATE);
         String experiment = prefs.getString("experiment_id", "default");
-        int duration = prefs.getInt("recording_duration", 30);
+        int duration = prefs.getInt("recording_duration", 2400);
 
         SessionManager.getInstance().startSession(ctx, experiment);
         TimeSync.startSessionClock();
@@ -229,6 +233,28 @@ public class EcgViewHolder extends RecyclerView.ViewHolder {
     }
     // endregion
 
+    /**
+     * 刷新连接状态UI（用于“一键连接”/自动断开等非卡片内按钮触发的场景）
+     * 在UI线程调用。
+     */
+    public void refreshConnectionUi() {
+        if (!initialized || controller == null) return;
+
+        Device d = controller.getConnectedDevice();
+        if (d != null && controller.isConnected()) {
+            statusText.setText("已连接");
+            currentDevice = d;
+            renderConnectedDevice(d);
+            return;
+        }
+
+        statusText.setText("未连接");
+        manualRecording = false;
+        currentDevice = null;
+        if (toggleSamplingBtn != null) toggleSamplingBtn.setText("开始录制");
+        if (deviceListContainer != null) deviceListContainer.removeAllViews();
+    }
+
     // region 监听器
     private final ECGMeasurementController.Listener listener = new ECGMeasurementController.Listener() {
         @Override
@@ -240,11 +266,22 @@ public class EcgViewHolder extends RecyclerView.ViewHolder {
                 case CONNECTED:
                 case READY:
                     statusText.setText("已连接");
+                    // 兼容“一键连接”：当连接不是由本ViewHolder的 connectDevice() 触发时，
+                    // 也需要渲染已连接设备的详情卡片
+                    if (device != null && (currentDevice == null
+                            || deviceListContainer.getChildCount() == 0
+                            || (currentDevice.getId() != null && !currentDevice.getId().equals(device.getId())))) {
+                        currentDevice = device;
+                        renderConnectedDevice(device);
+                    }
                     break;
                 case DISCONNECTED:
                     statusText.setText("未连接");
                     manualRecording = false;
                     if (toggleSamplingBtn != null) toggleSamplingBtn.setText("开始录制");
+                    if (deviceListContainer != null) deviceListContainer.removeAllViews();
+                    if (scannedDeviceContainer != null) scannedDeviceContainer.removeAllViews();
+                    currentDevice = null;
                     break;
             }
         }

@@ -195,6 +195,32 @@ public class NotificationHandler {
         Log.d(TAG, "Exercise status callback set");
     }
 
+    /**
+     * 清空指环实时波形图（避免两次录制的波形混在一起）
+     * 仅清UI缓冲区，不影响设备连接/测量状态。
+     */
+    public static void clearRingPlots() {
+        try {
+            if (plotViewG != null) plotViewG.clearPlot();
+            if (plotViewR != null) plotViewR.clearPlot();
+            if (plotViewI != null) plotViewI.clearPlot();
+
+            if (plotViewX != null) plotViewX.clearPlot();
+            if (plotViewY != null) plotViewY.clearPlot();
+            if (plotViewZ != null) plotViewZ.clearPlot();
+
+            if (plotViewGyroX != null) plotViewGyroX.clearPlot();
+            if (plotViewGyroY != null) plotViewGyroY.clearPlot();
+            if (plotViewGyroZ != null) plotViewGyroZ.clearPlot();
+
+            if (plotViewTemp0 != null) plotViewTemp0.clearPlot();
+            if (plotViewTemp1 != null) plotViewTemp1.clearPlot();
+            if (plotViewTemp2 != null) plotViewTemp2.clearPlot();
+        } catch (Exception e) {
+            Log.e(TAG, "clearRingPlots failed", e);
+        }
+    }
+
     // 获取和设置测量配置
     public static MeasurementConfig getMeasurementConfig() {
         return measurementConfig;

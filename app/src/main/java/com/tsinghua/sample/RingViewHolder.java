@@ -2113,6 +2113,11 @@ public class RingViewHolder extends RecyclerView.ViewHolder {
                     recordLog("【蓝牙状态】" + status);
                     if ("连接成功".equals(status)) {
                         updateConnectionStatus(true);
+                        // 记录最近一次成功连接的指环MAC（用于“一键连接”）
+                        context.getSharedPreferences("AppSettings", MODE_PRIVATE)
+                                .edit()
+                                .putString("last_connected_ring_mac", macAddress)
+                                .apply();
                         Toast.makeText(context, "指环连接成功", Toast.LENGTH_SHORT).show();
                     } else if ("连接失败".equals(status) || "未发现设备".equals(status)) {
                         updateConnectionStatus(false);

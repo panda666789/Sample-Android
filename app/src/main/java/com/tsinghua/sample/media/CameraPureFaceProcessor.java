@@ -803,7 +803,7 @@ public class CameraPureFaceProcessor {
 
         // 读取质量评估开关设置
         SharedPreferences prefs = activity.getSharedPreferences("AppSettings", Context.MODE_PRIVATE);
-        qualityEvaluationEnabled = prefs.getBoolean("enable_quality_evaluation", true);
+        qualityEvaluationEnabled = prefs.getBoolean("enable_quality_evaluation", false);
         Log.d(TAG, "视频质量评估功能: " + (qualityEvaluationEnabled ? "已启用" : "已禁用"));
 
         // 重置质量评估器和帧计数

@@ -93,7 +93,7 @@
                 android:id="@+id/tv_duration_display"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="30秒"
+                android:text="40分钟"
                 android:textSize="14sp"
                 android:textColor="@android:color/darker_gray"
                 android:layout_marginStart="12dp" />

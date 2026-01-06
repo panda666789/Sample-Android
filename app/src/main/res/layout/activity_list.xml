@@ -274,6 +274,18 @@
                 android:textColor="#666666"
                 android:layout_marginBottom="12dp" />
 
+            <!-- 一键连接按钮 -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_one_click_connect"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="一键连接"
+                android:textSize="14sp"
+                app:cornerRadius="24dp"
+                app:strokeColor="@color/teal_700"
+                android:layout_marginBottom="8dp" />
+
             <!-- 主录制按钮 -->
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_start_all"

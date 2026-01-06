@@ -39,7 +39,7 @@ public class FrontCameraSettingsActivity extends AppCompatActivity {
         // 读取缓存
         SharedPreferences prefs = getSharedPreferences("AppSettings", MODE_PRIVATE);
         boolean enabled = prefs.getBoolean("enable_inference", false);
-        boolean qualityEvaluationEnabled = prefs.getBoolean("enable_quality_evaluation", true);
+        boolean qualityEvaluationEnabled = prefs.getBoolean("enable_quality_evaluation", false);
         String format = prefs.getString("video_format", "mp4");
 
         // 应用到视图

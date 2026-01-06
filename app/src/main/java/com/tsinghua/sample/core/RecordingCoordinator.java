@@ -49,7 +49,7 @@ public class RecordingCoordinator {
     private Consumer<String> statusCallback;
 
     // 录制时长控制（对齐iOS）
-    private int maxRecordingDuration = 30; // 默认30秒
+    private int maxRecordingDuration = 2400; // 默认40分钟
     private long recordingStartTime = 0;
     private Handler durationHandler;
     private Runnable durationRunnable;
@@ -101,7 +101,7 @@ public class RecordingCoordinator {
      */
     public void loadRecordingDuration() {
         SharedPreferences prefs = context.getSharedPreferences("AppSettings", Context.MODE_PRIVATE);
-        maxRecordingDuration = prefs.getInt("recording_duration", 30);
+        maxRecordingDuration = prefs.getInt("recording_duration", 2400);
         Log.d(TAG, "Loaded recording duration: " + maxRecordingDuration + " seconds");
     }
 
@@ -198,6 +198,9 @@ public class RecordingCoordinator {
      * 启动指环同步测量（对齐iOS ringController.beginSynchronizedMeasurement）
      */
     private void startRingSynchronizedMeasurement() {
+        // 开始新一轮录制前先清空波形图，避免与上一轮波形混叠
+        NotificationHandler.clearRingPlots();
+
         // 设置测量时长
         NotificationHandler.setMeasurementTime(maxRecordingDuration);
 

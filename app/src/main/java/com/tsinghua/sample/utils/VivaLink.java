@@ -80,7 +80,7 @@ public class VivaLink {
         if (appCtx == null) return;
         SharedPreferences prefs = appCtx.getSharedPreferences("AppSettings", Context.MODE_PRIVATE);
         String experiment = prefs.getString("experiment_id", "default");
-        int duration = prefs.getInt("recording_duration", 30);
+        int duration = prefs.getInt("recording_duration", 2400);
 
         SessionManager sm = SessionManager.getInstance();
         sm.ensureSession(appCtx, experiment);

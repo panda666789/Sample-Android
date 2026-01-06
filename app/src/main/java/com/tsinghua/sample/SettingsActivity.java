@@ -54,7 +54,7 @@ public class SettingsActivity extends AppCompatActivity {
         int savedTime = prefs.getInt("time_parameter", 0);
         int savedYAxisMin = prefs.getInt("y_axis_min", 0);
         String savedExperimentId = prefs.getString("experiment_id", "");
-        int savedRecordingDuration = prefs.getInt("recording_duration", 30); // 默认30秒
+        int savedRecordingDuration = prefs.getInt("recording_duration", 2400); // 默认40分钟
 
         etExperimentId.setText(savedExperimentId);
 

@@ -20,6 +20,7 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
@@ -38,12 +39,15 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.mediapipe.solutions.facemesh.FaceMesh;
 import com.lm.sdk.LmAPI;
+import com.lm.sdk.inter.BluetoothConnectCallback;
 import com.lm.sdk.inter.IHistoryListener;
 import com.lm.sdk.inter.IResponseListener;
 import com.lm.sdk.mode.HistoryDataBean;
 import com.lm.sdk.mode.SystemControlBean;
+import com.lm.sdk.utils.GlobalParameterUtils;
 import com.lm.sdk.utils.BLEUtils;
 import com.tsinghua.sample.DeviceAdapter;
+import com.tsinghua.sample.EcgViewHolder;
 import com.tsinghua.sample.R;
 import com.tsinghua.sample.RingViewHolder;
 import com.tsinghua.sample.SettingsActivity;
@@ -54,6 +58,7 @@ import com.tsinghua.sample.media.CameraFaceProcessor;
 import com.tsinghua.sample.media.CameraHelper;
 import com.tsinghua.sample.media.CameraPureFaceProcessor;
 import com.tsinghua.sample.model.Device;
+import com.tsinghua.sample.utils.BLEService;
 import com.tsinghua.sample.utils.NotificationHandler;
 import com.tsinghua.sample.utils.HeartRateEstimator;
 import com.tsinghua.sample.utils.PlotView;
@@ -61,6 +66,8 @@ import com.tsinghua.sample.utils.VideoQualityEvaluator;
 import com.tsinghua.sample.ecg.ECGMeasurementController;
 import com.vivalnk.sdk.BuildConfig;
 import com.vivalnk.sdk.VitalClient;
+import com.vivalnk.sdk.ble.BluetoothScanListener;
+import com.vivalnk.sdk.ble.BluetoothConnectListener;
 import com.vivalnk.sdk.exception.VitalCode;
 import com.vivalnk.sdk.utils.ProcessUtils;
 
@@ -78,6 +85,7 @@ import org.opencv.android.OpenCVLoader;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -123,6 +131,7 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
     // 底部操作栏
     private Button btnStartAll;
     private Button btnStopAll;
+    private Button btnOneClickConnect;
     private android.widget.TextView statusText; // 录制状态和剩余时间显示
 
     // 摄像头状态
@@ -401,6 +410,7 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
         // 底部操作按钮
         btnStartAll = findViewById(R.id.btn_start_all);
         btnStopAll = findViewById(R.id.btn_stop_all);
+        btnOneClickConnect = findViewById(R.id.btn_one_click_connect);
         statusText = findViewById(R.id.statusText);
 
         // 设置摄像头卡片折叠/展开
@@ -421,9 +431,351 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
         // 主录制按钮 - 切换开始/停止
         btnStartAll.setOnClickListener(v -> toggleRecording());
         btnStopAll.setOnClickListener(v -> stopAllRecording());
+        btnOneClickConnect.setOnClickListener(v -> oneClickConnectDevices());
 
         // 默认选中前置
         updateCameraSelection(0);
+    }
+
+    private interface ConnectResultCallback {
+        void onResult(boolean success, String message);
+    }
+
+    private String buildOneClickConnectMessage(String ringStatus, String ecgStatus) {
+        return "指环：" + ringStatus + "\n心电：" + ecgStatus;
+    }
+
+    private String formatOneClickResultLine(String deviceName, String mac, boolean success, String message) {
+        if (TextUtils.isEmpty(mac)) {
+            return deviceName + "：未保存MAC";
+        }
+        if (success) {
+            return deviceName + "：连接成功（" + mac + "）";
+        }
+        String reason = TextUtils.isEmpty(message) ? "未知原因" : message;
+        return deviceName + "：连接失败（" + reason + "，" + mac + "）";
+    }
+
+    private void oneClickConnectDevices() {
+        SharedPreferences prefs = getSharedPreferences("AppSettings", MODE_PRIVATE);
+        String ringMac = prefs.getString("last_connected_ring_mac", "");
+        if (TextUtils.isEmpty(ringMac)) {
+            ringMac = prefs.getString("mac_address", "");
+        }
+        String ecgMac = prefs.getString("last_connected_ecg_mac", "");
+        final String finalRingMac = ringMac;
+        final String finalEcgMac = ecgMac;
+
+        if (TextUtils.isEmpty(ringMac) && TextUtils.isEmpty(ecgMac)) {
+            new AlertDialog.Builder(this)
+                    .setTitle("一键连接")
+                    .setMessage("未找到上次连接的指环/心电设备，请先分别连接一次后再使用“一键连接”。")
+                    .setPositiveButton("确定", null)
+                    .show();
+            return;
+        }
+
+        if (btnOneClickConnect != null) {
+            btnOneClickConnect.setEnabled(false);
+        }
+
+        final boolean[] ringOk = {false};
+        final boolean[] ecgOk = {false};
+        final String[] ringMsg = {""};
+        final String[] ecgMsg = {""};
+
+        final String[] ringStatus = {TextUtils.isEmpty(ringMac) ? "未保存MAC" : "连接中..."};
+        final String[] ecgStatus = {TextUtils.isEmpty(ecgMac) ? "未保存MAC" : "等待连接..."};
+
+        AlertDialog progressDialog = new AlertDialog.Builder(this)
+                .setTitle("一键连接")
+                .setMessage(buildOneClickConnectMessage(ringStatus[0], ecgStatus[0]))
+                .setCancelable(false)
+                .show();
+
+        Runnable finish = () -> {
+            if (!isFinishing() && progressDialog != null && progressDialog.isShowing()) {
+                progressDialog.dismiss();
+            }
+            if (btnOneClickConnect != null) {
+                btnOneClickConnect.setEnabled(true);
+            }
+
+            String resultMsg = formatOneClickResultLine("指环", finalRingMac, ringOk[0], ringMsg[0])
+                    + "\n" + formatOneClickResultLine("心电", finalEcgMac, ecgOk[0], ecgMsg[0]);
+
+            if (!isFinishing()) {
+                new AlertDialog.Builder(this)
+                        .setTitle("连接结果")
+                        .setMessage(resultMsg)
+                        .setPositiveButton("确定", null)
+                        .show();
+            }
+        };
+
+        ConnectResultCallback connectEcg = (success, message) -> {
+            ecgOk[0] = success;
+            ecgMsg[0] = message;
+            ecgStatus[0] = success ? "连接成功" : "连接失败";
+            if (!isFinishing() && progressDialog != null && progressDialog.isShowing()) {
+                progressDialog.setMessage(buildOneClickConnectMessage(ringStatus[0], ecgStatus[0]));
+            }
+            finish.run();
+        };
+
+        if (TextUtils.isEmpty(ringMac)) {
+            ringStatus[0] = "未保存MAC";
+            if (!isFinishing() && progressDialog != null && progressDialog.isShowing()) {
+                progressDialog.setMessage(buildOneClickConnectMessage(ringStatus[0], ecgStatus[0]));
+            }
+            if (TextUtils.isEmpty(ecgMac)) {
+                ecgStatus[0] = "未保存MAC";
+                finish.run();
+                return;
+            }
+            ecgStatus[0] = "连接中...";
+            if (!isFinishing() && progressDialog != null && progressDialog.isShowing()) {
+                progressDialog.setMessage(buildOneClickConnectMessage(ringStatus[0], ecgStatus[0]));
+            }
+            connectLastEcgDevice(ecgMac, connectEcg);
+            return;
+        }
+
+        connectLastRingDevice(ringMac, (success, message) -> {
+            ringOk[0] = success;
+            ringMsg[0] = message;
+            ringStatus[0] = success ? "连接成功" : "连接失败";
+
+            if (TextUtils.isEmpty(ecgMac)) {
+                ecgStatus[0] = "未保存MAC";
+                if (!isFinishing() && progressDialog != null && progressDialog.isShowing()) {
+                    progressDialog.setMessage(buildOneClickConnectMessage(ringStatus[0], ecgStatus[0]));
+                }
+                finish.run();
+                return;
+            }
+
+            ecgStatus[0] = "连接中...";
+            if (!isFinishing() && progressDialog != null && progressDialog.isShowing()) {
+                progressDialog.setMessage(buildOneClickConnectMessage(ringStatus[0], ecgStatus[0]));
+            }
+            connectLastEcgDevice(ecgMac, connectEcg);
+        });
+    }
+
+    private EcgViewHolder getEcgViewHolder() {
+        if (recyclerView != null) {
+            RecyclerView.ViewHolder vh = recyclerView.findViewHolderForAdapterPosition(3);
+            if (vh instanceof EcgViewHolder) {
+                return (EcgViewHolder) vh;
+            }
+        }
+        return DeviceAdapter.currentEcgViewHolder;
+    }
+
+    private void autoDisconnectRingAndEcgAfterStop() {
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            try {
+                stopService(new Intent(this, BLEService.class));
+                if (ringViewHolder == null && recyclerView != null) {
+                    RecyclerView.ViewHolder vh = recyclerView.findViewHolderForAdapterPosition(2);
+                    if (vh instanceof RingViewHolder) {
+                        ringViewHolder = (RingViewHolder) vh;
+                    }
+                }
+                if (ringViewHolder != null) {
+                    ringViewHolder.updateConnectionStatus(false);
+                    ringViewHolder.recordLog("【自动断开】停止录制后自动断开指环连接");
+                }
+            } catch (Exception e) {
+                Log.e("ListActivity", "Auto disconnect ring failed", e);
+            }
+
+            try {
+                ECGMeasurementController.getInstance().disconnect();
+                EcgViewHolder vh = getEcgViewHolder();
+                if (vh != null) {
+                    vh.refreshConnectionUi();
+                }
+            } catch (Exception e) {
+                Log.e("ListActivity", "Auto disconnect ecg failed", e);
+            }
+        }, 500);
+    }
+
+    private void connectLastRingDevice(String mac, ConnectResultCallback cb) {
+        if (TextUtils.isEmpty(mac)) {
+            cb.onResult(false, "未保存MAC");
+            return;
+        }
+
+        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+        if (adapter == null) {
+            cb.onResult(false, "蓝牙不可用");
+            return;
+        }
+
+        if (!adapter.isEnabled()) {
+            cb.onResult(false, "蓝牙未开启");
+            return;
+        }
+
+        BluetoothDevice device;
+        try {
+            device = adapter.getRemoteDevice(mac);
+        } catch (IllegalArgumentException e) {
+            cb.onResult(false, "MAC格式错误");
+            return;
+        }
+
+        AtomicBoolean done = new AtomicBoolean(false);
+        Handler handler = new Handler(Looper.getMainLooper());
+        Runnable timeout = () -> {
+            if (done.compareAndSet(false, true)) {
+                cb.onResult(false, "连接超时");
+            }
+        };
+        handler.postDelayed(timeout, 15_000);
+
+        BLEService.setCallback(new BluetoothConnectCallback() {
+            @Override
+            public void onConnectReceived(String status, byte[] data) {
+                handler.post(() -> {
+                    if (ringViewHolder != null) {
+                        ringViewHolder.recordLog("【一键连接】" + status);
+                    }
+
+                    if ("连接成功".equals(status)) {
+                        if (done.compareAndSet(false, true)) {
+                            handler.removeCallbacks(timeout);
+                            getSharedPreferences("AppSettings", MODE_PRIVATE)
+                                    .edit()
+                                    .putString("last_connected_ring_mac", mac)
+                                    .apply();
+                            if (ringViewHolder != null) ringViewHolder.updateConnectionStatus(true);
+                            cb.onResult(true, "连接成功");
+                        }
+                    } else if ("连接失败".equals(status) || "未发现设备".equals(status)) {
+                        if (done.compareAndSet(false, true)) {
+                            handler.removeCallbacks(timeout);
+                            if (ringViewHolder != null) ringViewHolder.updateConnectionStatus(false);
+                            cb.onResult(false, status);
+                        }
+                    }
+                });
+            }
+
+            @Override
+            public void onGetRssi(int rssi) {
+            }
+        });
+
+        GlobalParameterUtils.getInstance().setDevice(device);
+        BLEUtils.contentTitle = "智能指环数据采集中";
+
+        Intent svc = new Intent(this, BLEService.class);
+        svc.putExtra("CONNECT_DEVICE", device);
+        svc.putExtra("BLUETOOTH_HID_MODE", false);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(svc);
+        } else {
+            startService(svc);
+        }
+    }
+
+    private void connectLastEcgDevice(String mac, ConnectResultCallback cb) {
+        if (TextUtils.isEmpty(mac)) {
+            cb.onResult(false, "未保存MAC");
+            return;
+        }
+
+        ECGMeasurementController controller = ECGMeasurementController.getInstance();
+        controller.init(this);
+
+        com.vivalnk.sdk.model.Device connected = controller.getConnectedDevice();
+        if (connected != null && controller.isConnected() && mac.equalsIgnoreCase(connected.getId())) {
+            getSharedPreferences("AppSettings", MODE_PRIVATE)
+                    .edit()
+                    .putString("last_connected_ecg_mac", connected.getId())
+                    .apply();
+            EcgViewHolder vh = getEcgViewHolder();
+            if (vh != null) {
+                vh.refreshConnectionUi();
+            }
+            cb.onResult(true, "已连接");
+            return;
+        }
+
+        controller.stopScan();
+
+        AtomicBoolean done = new AtomicBoolean(false);
+        Handler handler = new Handler(Looper.getMainLooper());
+        Runnable timeout = () -> {
+            if (done.compareAndSet(false, true)) {
+                controller.stopScan();
+                cb.onResult(false, "连接超时");
+            }
+        };
+        handler.postDelayed(timeout, 25_000);
+
+        controller.startScan(new BluetoothScanListener() {
+            @Override
+            public void onDeviceFound(com.vivalnk.sdk.model.Device device) {
+                if (device == null || TextUtils.isEmpty(device.getId())) return;
+                if (!mac.equalsIgnoreCase(device.getId())) return;
+
+                controller.stopScan();
+
+                controller.connect(device, new BluetoothConnectListener() {
+                    @Override
+                    public void onConnected(com.vivalnk.sdk.model.Device d) {
+                    }
+
+                    @Override
+                    public void onDeviceReady(com.vivalnk.sdk.model.Device d) {
+                        handler.post(() -> {
+                            if (done.compareAndSet(false, true)) {
+                                handler.removeCallbacks(timeout);
+                                getSharedPreferences("AppSettings", MODE_PRIVATE)
+                                        .edit()
+                                        .putString("last_connected_ecg_mac", d.getId())
+                                        .apply();
+                                EcgViewHolder vh = getEcgViewHolder();
+                                if (vh != null) {
+                                    vh.refreshConnectionUi();
+                                }
+                                cb.onResult(true, "连接成功");
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void onError(com.vivalnk.sdk.model.Device d, int code, String msg) {
+                        handler.post(() -> {
+                            if (done.compareAndSet(false, true)) {
+                                handler.removeCallbacks(timeout);
+                                cb.onResult(false, "错误[" + code + "]: " + msg);
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void onDisconnected(com.vivalnk.sdk.model.Device d, boolean isForce) {
+                        handler.post(() -> {
+                            if (done.compareAndSet(false, true)) {
+                                handler.removeCallbacks(timeout);
+                                cb.onResult(false, "连接断开");
+                            }
+                        });
+                    }
+                });
+            }
+
+            @Override
+            public void onStop() {
+            }
+        });
     }
 
     /**
@@ -830,7 +1182,7 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
 
                     // 判断是否需要后处理（且质量评估已启用）
                     SharedPreferences autoStopPrefs = getSharedPreferences("AppSettings", MODE_PRIVATE);
-                    boolean qualityEvalEnabled = autoStopPrefs.getBoolean("enable_quality_evaluation", true);
+                    boolean qualityEvalEnabled = autoStopPrefs.getBoolean("enable_quality_evaluation", false);
                     boolean needPostProcess = (currentCameraMode == 0 || currentCameraMode == 2)
                                               && finalVideoPath != null
                                               && qualityEvalEnabled;
@@ -850,6 +1202,9 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
                     }
                     setCameraPlaceholderText("点击开始录制显示预览");
                     Toast.makeText(this, "录制时长到达，自动停止", Toast.LENGTH_SHORT).show();
+
+                    // 自动断开指环与心电，避免下一次连接/测量状态残留
+                    autoDisconnectRingAndEcgAfterStop();
 
                     // 如果需要后处理，启动后处理流程
                     if (needPostProcess) {
@@ -989,7 +1344,7 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
 
         // 判断是否需要后处理（前置摄像头模式或双摄模式，且质量评估已启用）
         SharedPreferences prefs = getSharedPreferences("AppSettings", MODE_PRIVATE);
-        boolean qualityEvaluationEnabled = prefs.getBoolean("enable_quality_evaluation", true);
+        boolean qualityEvaluationEnabled = prefs.getBoolean("enable_quality_evaluation", false);
         boolean needPostProcess = (currentCameraMode == 0 || currentCameraMode == 2)
                                   && finalVideoPath != null
                                   && qualityEvaluationEnabled;
@@ -1003,6 +1358,9 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
         if (recordingCoordinator != null) {
             recordingCoordinator.stop();
         }
+
+        // 自动断开指环与心电，避免下一次连接/测量状态残留
+        autoDisconnectRingAndEcgAfterStop();
 
         // 更新UI状态
         if (btnStartAll != null) {

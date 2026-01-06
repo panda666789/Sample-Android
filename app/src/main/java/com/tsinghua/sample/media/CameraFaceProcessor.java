@@ -553,7 +553,7 @@ public class CameraFaceProcessor {
             return;
         }
         SharedPreferences prefs = activity.getSharedPreferences("AppSettings", Context.MODE_PRIVATE);
-        qualityEvaluationEnabled = prefs.getBoolean("enable_quality_evaluation", true);
+        qualityEvaluationEnabled = prefs.getBoolean("enable_quality_evaluation", false);
         Log.d(TAG, "视频质量评估功能: " + (qualityEvaluationEnabled ? "已启用" : "已禁用"));
         String experimentId = prefs.getString("experiment_id", "default");
         final String baseDir = Environment
