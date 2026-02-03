@@ -158,6 +158,8 @@ public class CameraPureFaceProcessor {
     }
     private OnQualityResultListener qualityResultListener;
 
+
+
     /**
      * 初始化完成回调
      */
