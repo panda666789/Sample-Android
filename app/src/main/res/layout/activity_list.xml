@@ -4,7 +4,8 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F5F5F5">
+    android:background="#F5F5F5"
+    android:fitsSystemWindows="true">
 
     <!-- 顶部固定：摄像头控制卡片 -->
     <com.google.android.material.card.MaterialCardView
@@ -12,7 +13,7 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginHorizontal="16dp"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="14dp"
         app:cardCornerRadius="12dp"
         app:cardElevation="2dp"
         app:strokeWidth="0dp"
@@ -127,29 +128,27 @@
                 <androidx.constraintlayout.widget.ConstraintLayout
                     android:id="@+id/cameraPreviewContainer"
                     android:layout_width="match_parent"
-                    android:layout_height="200dp"
-                    android:layout_marginTop="8dp"
-                    android:background="#1A1A1A"
+                    android:layout_height="212dp"
+                    android:layout_marginTop="10dp"
+                    android:background="#101820"
                     android:clipChildren="true"
                     android:clipToPadding="true">
 
-                    <!-- 主预览 SurfaceView - 保持9:16比例居中 -->
+                    <!-- 主预览 SurfaceView - 填满展示区；录制输出仍由 CameraHelper/processor 控制 -->
                     <SurfaceView
                         android:id="@+id/mainCameraSurfaceView"
                         android:layout_width="0dp"
                         android:layout_height="0dp"
-                        app:layout_constraintDimensionRatio="9:16"
                         app:layout_constraintTop_toTopOf="parent"
                         app:layout_constraintBottom_toBottomOf="parent"
                         app:layout_constraintStart_toStartOf="parent"
-                        app:layout_constraintEnd_toEndOf="parent"
-                        app:layout_constraintHeight_percent="1.0" />
+                        app:layout_constraintEnd_toEndOf="parent" />
 
                     <!-- 画中画预览（双摄时后置） -->
                     <com.google.android.material.card.MaterialCardView
                         android:id="@+id/pipCameraContainer"
-                        android:layout_width="60dp"
-                        android:layout_height="106dp"
+                        android:layout_width="104dp"
+                        android:layout_height="72dp"
                         android:layout_margin="8dp"
                         android:visibility="gone"
                         app:cardCornerRadius="6dp"
@@ -308,6 +307,37 @@
                 android:textSize="14sp"
                 app:cornerRadius="24dp"
                 app:strokeColor="@color/teal_700" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_patient_records"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="48dp"
+                    android:layout_marginEnd="4dp"
+                    android:text="患者记录"
+                    android:textSize="14sp"
+                    app:cornerRadius="24dp"
+                    app:strokeColor="@color/teal_700" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_templates"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="48dp"
+                    android:layout_marginStart="4dp"
+                    android:text="科室模板"
+                    android:textSize="14sp"
+                    app:cornerRadius="24dp"
+                    app:strokeColor="@color/teal_700" />
+            </LinearLayout>
 
             <!-- 隐藏的按钮引用（保持兼容性） -->
             <com.google.android.material.button.MaterialButton

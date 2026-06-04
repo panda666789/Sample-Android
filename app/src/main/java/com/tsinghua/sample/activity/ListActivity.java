@@ -28,7 +28,6 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.Toast;
 
-import androidx.activity.EdgeToEdge;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
@@ -308,11 +307,18 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
         }
 
         checkOximeterUsbPermission();
-        EdgeToEdge.enable(this);
 
         Button btnSettings = findViewById(R.id.btn_settings);
         btnSettings.setOnClickListener(v -> {
             startActivity(new Intent(ListActivity.this, SettingsActivity.class));
+        });
+        Button btnPatientRecords = findViewById(R.id.btn_patient_records);
+        btnPatientRecords.setOnClickListener(v -> {
+            startActivity(new Intent(ListActivity.this, PatientRecordsActivity.class));
+        });
+        Button btnTemplates = findViewById(R.id.btn_templates);
+        btnTemplates.setOnClickListener(v -> {
+            startActivity(new Intent(ListActivity.this, TemplateListActivity.class));
         });
 
         Button btnTimeStamp = findViewById(R.id.btn_Timestamp);

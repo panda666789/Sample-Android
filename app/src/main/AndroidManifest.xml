@@ -55,6 +55,15 @@
         <activity
             android:name=".activity.PatientInfoActivity"
             android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".activity.TemplateListActivity"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".activity.TemplateEditorActivity"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".activity.PatientRecordsActivity"
+            android:windowSoftInputMode="adjustResize" />
         <service
             android:name=".utils.BLEService"
             android:enabled="true"
