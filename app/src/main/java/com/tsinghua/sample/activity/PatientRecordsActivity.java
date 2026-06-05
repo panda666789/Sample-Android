@@ -32,6 +32,7 @@ import com.tsinghua.sample.patient.model.FieldValue;
 import com.tsinghua.sample.patient.model.FormSection;
 import com.tsinghua.sample.patient.model.PatientInfoData;
 import com.tsinghua.sample.patient.model.PatientInfoValidator;
+import com.tsinghua.sample.patient.model.PatientFieldResolver;
 import com.tsinghua.sample.patient.model.PatientValueFormatter;
 import com.tsinghua.sample.patient.storage.PatientRecord;
 import com.tsinghua.sample.patient.storage.PatientRecordRepository;
@@ -108,7 +109,7 @@ public class PatientRecordsActivity extends AppCompatActivity {
         boolean any = false;
         for (PatientRecord record : records) {
             String patientId = nullToEmpty(record.getData().getPatientId());
-            String patientName = fieldText(record.getData(), "patientName");
+            String patientName = displayPatientName(record, "");
             if (!query.isEmpty()
                     && !patientId.toLowerCase().contains(query)
                     && !patientName.toLowerCase().contains(query)) {
@@ -135,7 +136,7 @@ public class PatientRecordsActivity extends AppCompatActivity {
         LinearLayout content = GroupedUi.cardContent(this);
         card.addView(content);
 
-        TextView title = GroupedUi.title(this, fieldText(record.getData(), "patientName", "未填写姓名"));
+        TextView title = GroupedUi.title(this, displayPatientName(record, "未填写姓名"));
         content.addView(title);
 
         content.addView(GroupedUi.metaRow(this, "病例号", nullToEmpty(record.getData().getPatientId())));
@@ -250,7 +251,7 @@ public class PatientRecordsActivity extends AppCompatActivity {
     }
 
     private void confirmDeleteRecord(PatientRecord record, Runnable beforeReload) {
-        String patientName = fieldText(record.getData(), "patientName", "未填写姓名");
+        String patientName = displayPatientName(record, "未填写姓名");
         new AlertDialog.Builder(this)
                 .setTitle("删除患者记录")
                 .setMessage("确定删除「" + patientName + "」对应的整个采集会话文件夹？患者信息、视频和设备数据都会一起删除。")
@@ -309,6 +310,7 @@ public class PatientRecordsActivity extends AppCompatActivity {
             }
         }
         preservePhotoFields(original, template, allFields, fields);
+        PatientFieldResolver.normalizePatientName(template, fields);
         FieldValue patientIdValue = fields.get("patientId");
         String patientId = patientIdValue == null ? "" : nullToEmpty(patientIdValue.asString()).trim();
         return new PatientInfoData(original.getTemplateId(), original.getTemplateName(), patientId,
@@ -581,6 +583,14 @@ public class PatientRecordsActivity extends AppCompatActivity {
         FieldValue value = data.getFields().get(fieldId);
         String text = value == null ? "" : value.asString();
         return text == null || text.trim().isEmpty() ? fallback : text;
+    }
+
+    private String displayPatientName(PatientRecord record, String fallback) {
+        DepartmentTemplate template = templateRepository.templateById(record.getData().getTemplateId());
+        if (template == null) {
+            template = fallbackTemplateForRecord(record.getData());
+        }
+        return PatientFieldResolver.patientName(record.getData(), template, fallback);
     }
 
     private String valueOf(PatientInfoData data, String key) {

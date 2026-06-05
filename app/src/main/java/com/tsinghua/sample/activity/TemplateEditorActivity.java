@@ -32,6 +32,7 @@ import com.tsinghua.sample.patient.ui.GroupedUi;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -131,6 +132,20 @@ public class TemplateEditorActivity extends AppCompatActivity {
             if (field.getVisibleWhen() != null) detail.append(" / 条件显示");
             row.addView(GroupedUi.caption(this, detail.toString()));
             int finalFieldIndex = fieldIndex;
+            LinearLayout fieldActions = new LinearLayout(this);
+            fieldActions.setGravity(Gravity.END);
+            MaterialButton edit = GroupedUi.textButton(this, "编辑");
+            edit.setOnClickListener(v -> showFieldEditor(sectionIndex, finalFieldIndex));
+            MaterialButton moveUp = GroupedUi.textButton(this, "上移");
+            moveUp.setEnabled(fieldIndex > 0);
+            moveUp.setOnClickListener(v -> moveField(sectionIndex, finalFieldIndex, -1));
+            MaterialButton moveDown = GroupedUi.textButton(this, "下移");
+            moveDown.setEnabled(fieldIndex < section.getFields().size() - 1);
+            moveDown.setOnClickListener(v -> moveField(sectionIndex, finalFieldIndex, 1));
+            fieldActions.addView(edit);
+            fieldActions.addView(moveUp);
+            fieldActions.addView(moveDown);
+            row.addView(fieldActions);
             row.setOnClickListener(v -> showFieldEditor(sectionIndex, finalFieldIndex));
             content.addView(row);
             if (fieldIndex < section.getFields().size() - 1) {
@@ -139,6 +154,20 @@ public class TemplateEditorActivity extends AppCompatActivity {
         }
 
         root.addView(card, cardParams);
+    }
+
+    private void moveField(int sectionIndex, int fieldIndex, int delta) {
+        List<FieldDefinition> fields = template.getSections().get(sectionIndex).getFields();
+        int targetIndex = fieldIndex + delta;
+        if (targetIndex < 0 || targetIndex >= fields.size()) {
+            return;
+        }
+        Collections.swap(fields, fieldIndex, targetIndex);
+        if (saveTemplate()) {
+            render();
+        } else {
+            Collections.swap(fields, fieldIndex, targetIndex);
+        }
     }
 
     private void showFieldEditor(int sectionIndex, int fieldIndex) {

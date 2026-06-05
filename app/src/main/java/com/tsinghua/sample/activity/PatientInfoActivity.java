@@ -40,6 +40,7 @@ import com.tsinghua.sample.patient.model.FieldValue;
 import com.tsinghua.sample.patient.model.FormSection;
 import com.tsinghua.sample.patient.model.PatientInfoData;
 import com.tsinghua.sample.patient.model.PatientInfoValidator;
+import com.tsinghua.sample.patient.model.PatientFieldResolver;
 import com.tsinghua.sample.patient.model.PatientValueFormatter;
 import com.tsinghua.sample.patient.storage.PatientRecordRepository;
 import com.tsinghua.sample.patient.storage.PatientStoragePaths;
@@ -511,6 +512,7 @@ public class PatientInfoActivity extends AppCompatActivity {
             }
             ensurePatientInfoWritable();
             Map<String, FieldValue> fields = collectFields(true);
+            PatientFieldResolver.normalizePatientName(template, fields);
             PatientInfoValidator.Result validation = PatientInfoValidator.validate(template, fields);
             if (!validation.isValid()) {
                 Toast.makeText(this, validation.getMessage(), Toast.LENGTH_SHORT).show();
