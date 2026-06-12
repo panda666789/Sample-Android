@@ -142,7 +142,7 @@ public class PatientRecordsActivity extends AppCompatActivity {
         content.addView(GroupedUi.metaRow(this, "病例号", nullToEmpty(record.getData().getPatientId())));
         content.addView(GroupedUi.divider(this));
         content.addView(GroupedUi.metaRow(this, "模板", record.getData().getTemplateName()));
-        content.addView(GroupedUi.metaRow(this, "录制开始", record.getData().getRecordingStartTime()));
+        content.addView(GroupedUi.metaRow(this, "录制开始", PatientValueFormatter.localDateTimeText(record.getData().getRecordingStartTime())));
         content.addView(GroupedUi.metaRow(this, "填写情况", "已填写 " + filledCount(record.getData()) + " 项"));
 
         LinearLayout actions = new LinearLayout(this);
@@ -178,7 +178,7 @@ public class PatientRecordsActivity extends AppCompatActivity {
         MaterialCardView sessionCard = GroupedUi.sectionCard(this);
         LinearLayout sessionContent = GroupedUi.cardContent(this);
         sessionContent.addView(GroupedUi.metaRow(this, "会话ID", record.getData().getSessionId()));
-        sessionContent.addView(GroupedUi.metaRow(this, "录制开始时间", record.getData().getRecordingStartTime()));
+        sessionContent.addView(GroupedUi.metaRow(this, "录制开始时间", PatientValueFormatter.localDateTimeText(record.getData().getRecordingStartTime())));
         sessionCard.addView(sessionContent);
         form.addView(sessionCard, GroupedUi.matchWrap(this));
 

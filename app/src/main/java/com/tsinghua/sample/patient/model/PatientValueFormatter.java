@@ -1,5 +1,9 @@
 package com.tsinghua.sample.patient.model;
 
+import java.text.SimpleDateFormat;
+import java.util.Locale;
+import java.util.TimeZone;
+
 public final class PatientValueFormatter {
     private PatientValueFormatter() {
     }
@@ -58,6 +62,25 @@ public final class PatientValueFormatter {
             return "true".equalsIgnoreCase(value.asString()) ? "是" : "否";
         }
         return nullToEmpty(value.asString());
+    }
+
+    public static String localDateTimeText(String storedValue) {
+        if (storedValue == null) {
+            return "";
+        }
+        String trimmed = storedValue.trim();
+        if (!isIsoInstant(trimmed)) {
+            return trimmed;
+        }
+        try {
+            SimpleDateFormat parser = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
+            parser.setTimeZone(TimeZone.getTimeZone("UTC"));
+            SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
+            formatter.setTimeZone(TimeZone.getDefault());
+            return formatter.format(parser.parse(trimmed));
+        } catch (Exception ignored) {
+            return trimmed;
+        }
     }
 
     private static String join(java.util.List<String> values, String separator) {

@@ -36,6 +36,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.TimeZone;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -476,6 +477,19 @@ public class PatientTemplateModelTest {
         assertFalse(PatientValueFormatter.isValidDateInput("2026/06/03"));
         assertTrue(PatientValueFormatter.dateFieldValueFromInput("2026/06/03").isEmpty());
         assertEquals("", PatientValueFormatter.dateInputText((FieldValue) null));
+    }
+
+    @Test
+    public void isoInstantsDisplayInDeviceLocalTimeForPatientRecords() {
+        TimeZone previous = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
+
+            assertEquals("2026-06-12 16:14:41",
+                    PatientValueFormatter.localDateTimeText("2026-06-12T08:14:41Z"));
+        } finally {
+            TimeZone.setDefault(previous);
+        }
     }
 
     @Test
