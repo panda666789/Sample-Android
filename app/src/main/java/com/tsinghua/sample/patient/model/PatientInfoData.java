@@ -36,8 +36,8 @@ public class PatientInfoData {
         content.append("模板: ").append(nullToEmpty(templateName)).append("\n");
         content.append("患者ID: ").append(nullToEmpty(patientId)).append("\n");
         content.append("录制会话ID: ").append(nullToEmpty(sessionId)).append("\n");
-        content.append("录制开始时间: ").append(nullToEmpty(recordingStartTime)).append("\n");
-        content.append("信息提交时间: ").append(nullToEmpty(submitTime)).append("\n");
+        content.append("录制开始时间(UTC+8): ").append(PatientValueFormatter.utcPlus8DateTimeText(recordingStartTime)).append("\n");
+        content.append("信息提交时间(UTC+8): ").append(PatientValueFormatter.utcPlus8DateTimeText(submitTime)).append("\n");
 
         if (template != null) {
             for (FormSection section : template.getSections()) {

@@ -1,10 +1,14 @@
 package com.tsinghua.sample.patient.model;
 
 import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Locale;
 import java.util.TimeZone;
 
 public final class PatientValueFormatter {
+    private static final TimeZone UTC = TimeZone.getTimeZone("UTC");
+    private static final TimeZone UTC_PLUS_8 = TimeZone.getTimeZone("GMT+08:00");
+
     private PatientValueFormatter() {
     }
 
@@ -65,6 +69,36 @@ public final class PatientValueFormatter {
     }
 
     public static String localDateTimeText(String storedValue) {
+        return dateTimeText(storedValue, TimeZone.getDefault());
+    }
+
+    public static String utcPlus8DateTimeText(String storedValue) {
+        return dateTimeText(storedValue, UTC_PLUS_8);
+    }
+
+    public static String utcPlus8DateTimeToIsoInstant(String utcPlus8Text) {
+        if (utcPlus8Text == null) {
+            return "";
+        }
+        String trimmed = utcPlus8Text.trim();
+        if (trimmed.isEmpty()) {
+            return "";
+        }
+        try {
+            SimpleDateFormat parser = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
+            parser.setLenient(false);
+            parser.setTimeZone(UTC_PLUS_8);
+            return isoInstantText(parser.parse(trimmed));
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    public static boolean isIsoInstant(String value) {
+        return value != null && value.matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z");
+    }
+
+    private static String dateTimeText(String storedValue, TimeZone timeZone) {
         if (storedValue == null) {
             return "";
         }
@@ -73,14 +107,26 @@ public final class PatientValueFormatter {
             return trimmed;
         }
         try {
-            SimpleDateFormat parser = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
-            parser.setTimeZone(TimeZone.getTimeZone("UTC"));
             SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
-            formatter.setTimeZone(TimeZone.getDefault());
-            return formatter.format(parser.parse(trimmed));
+            formatter.setTimeZone(timeZone);
+            return formatter.format(parseIsoInstant(trimmed));
         } catch (Exception ignored) {
             return trimmed;
         }
+    }
+
+    private static Date parseIsoInstant(String value) throws java.text.ParseException {
+        String pattern = value.contains(".") ? "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'" : "yyyy-MM-dd'T'HH:mm:ss'Z'";
+        SimpleDateFormat parser = new SimpleDateFormat(pattern, Locale.US);
+        parser.setLenient(false);
+        parser.setTimeZone(UTC);
+        return parser.parse(value);
+    }
+
+    private static String isoInstantText(Date date) {
+        SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
+        formatter.setTimeZone(UTC);
+        return formatter.format(date);
     }
 
     private static String join(java.util.List<String> values, String separator) {
@@ -96,7 +142,4 @@ public final class PatientValueFormatter {
         return value == null ? "" : value;
     }
 
-    private static boolean isIsoInstant(String value) {
-        return value.matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z");
-    }
 }

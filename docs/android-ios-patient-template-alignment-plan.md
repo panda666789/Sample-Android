@@ -174,6 +174,7 @@ Recommended route to discuss: B if patient records must travel with session fold
 - [x] Sentinel technical risk fixes, excluding accepted PII plaintext storage risk.
 - [x] Additional user-requested delete behavior: deleting a patient record now removes the whole corresponding `Session_...` directory.
 - [x] Real-device install/start smoke after latest delete/session safety and photo/time fixes.
+- [x] Patient info time semantics: new legacy `info/subject_info_*.txt` files label recording and submit times as `UTC+8`, while old UTC text and new UTC+8 text both display as correct Beijing time in patient records.
 
 ## Verification Notes
 
@@ -221,6 +222,10 @@ Recommended route to discuss: B if patient records must travel with session fold
 - 2026-06-03: Remaining Sentinel notes accepted/backlogged: patient data remains plaintext per user decision; Activity-level automation and real recording-file preview/output comparison are not fully automated in this pass and should be considered for a later instrumentation/manual QA round.
 - 2026-06-03: Final verification after Sentinel fixes passed: `JAVA_HOME=/Applications/Android Studio.app/Contents/jbr/Contents/Home ./gradlew testDebugUnitTest --tests com.tsinghua.sample.patient.PatientTemplateModelTest`, `JAVA_HOME=/Applications/Android Studio.app/Contents/jbr/Contents/Home ./gradlew testDebugUnitTest assembleDebug`, and layout `xmllint`.
 - 2026-06-03: Final device smoke after Sentinel fixes passed on `192.168.31.78:40169`: install returned `Success`, `am start -W` returned `Status: ok`, `pidof com.tsinghua.sample` returned process `15875`, and recent logcat showed no `FATAL EXCEPTION`.
+- 2026-06-26: Updated future legacy `info/subject_info_*.txt` output to write `录制开始时间(UTC+8)` and `信息提交时间(UTC+8)`, without adding duplicate raw UTC lines. Existing JSON keeps UTC ISO storage for machine compatibility.
+- 2026-06-26: Legacy record scanning now understands both old `录制开始时间: 2026-...Z` UTC text and new `录制开始时间(UTC+8): yyyy-MM-dd HH:mm:ss` text, normalizing both to internal UTC ISO before patient-record display converts back to UTC+8.
+- 2026-06-26: Patient record list/editor labels recording time as `UTC+8` and uses fixed UTC+8 conversion instead of depending on the phone's default timezone.
+- 2026-06-26: Time semantics verification passed: `JAVA_HOME=/Applications/Android Studio.app/Contents/jbr/Contents/Home ./gradlew testDebugUnitTest assembleDebug` and `git diff --check`.
 
 ## Sentinel Report
 

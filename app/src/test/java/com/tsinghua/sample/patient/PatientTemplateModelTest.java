@@ -133,6 +133,8 @@ public class PatientTemplateModelTest {
 
     @Test
     public void formatToTextGroupsFieldsByTemplateAndHandlesUnits() {
+        TimeZone previous = TimeZone.getDefault();
+        TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
         DepartmentTemplate template = BuiltInTemplates.cardioCerebrovascular();
         Map<String, FieldValue> fields = new LinkedHashMap<>();
         fields.put("patientId", FieldValue.string("MR001"));
@@ -158,15 +160,24 @@ public class PatientTemplateModelTest {
 
         String text = data.formatToText(template);
 
-        assertTrue(text.contains("模板: 心脑血管通用"));
-        assertTrue(text.contains("患者ID: MR001"));
-        assertTrue(text.contains("=== 基本信息 ==="));
-        assertTrue(text.contains("姓名: 张三"));
-        assertTrue(text.contains("=== 生命体征 ==="));
-        assertTrue(text.contains("心率: 72 bpm"));
-        assertTrue(text.contains("血压: 120/80 mmHg"));
-        assertTrue(text.contains("=== 诊断信息 ==="));
-        assertTrue(text.contains("诊断列表: I10.x00x002 高血压、I50.900x007 心力衰竭"));
+        try {
+            assertTrue(text.contains("模板: 心脑血管通用"));
+            assertTrue(text.contains("患者ID: MR001"));
+            assertTrue(text.contains("录制开始时间(UTC+8): 2026-06-03 17:00:00"));
+            assertTrue(text.contains("信息提交时间(UTC+8): 2026-06-03 17:10:00"));
+            assertFalse(text.contains("录制开始时间: 2026-06-03T09:00:00Z"));
+            assertFalse(text.contains("信息提交时间: 2026-06-03T09:10:00Z"));
+            assertFalse(text.contains("原始UTC"));
+            assertTrue(text.contains("=== 基本信息 ==="));
+            assertTrue(text.contains("姓名: 张三"));
+            assertTrue(text.contains("=== 生命体征 ==="));
+            assertTrue(text.contains("心率: 72 bpm"));
+            assertTrue(text.contains("血压: 120/80 mmHg"));
+            assertTrue(text.contains("=== 诊断信息 ==="));
+            assertTrue(text.contains("诊断列表: I10.x00x002 高血压、I50.900x007 心力衰竭"));
+        } finally {
+            TimeZone.setDefault(previous);
+        }
     }
 
     @Test
@@ -418,6 +429,52 @@ public class PatientTemplateModelTest {
     }
 
     @Test
+    public void legacyUtcInfoTimeDisplaysAsBeijingTime() throws Exception {
+        TimeZone previous = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
+            File session = temporaryFolder.newFolder("ExperimentLegacyUtc", "Session_1710000000004");
+            File infoDir = new File(session, "info");
+            assertTrue(infoDir.mkdirs());
+            writeText(new File(infoDir, "subject_info_20260603.txt"),
+                    "姓名: 赵六\n病历号: MR004\n录制开始时间: 2026-06-03T09:00:00Z\n");
+
+            PatientRecordRepository.ScanResult result = new PatientRecordRepository(temporaryFolder.getRoot()).scanRecordsWithStatus();
+
+            assertFalse(result.hasError());
+            assertEquals(1, result.getRecords().size());
+            String storedTime = result.getRecords().get(0).getData().getRecordingStartTime();
+            assertEquals("2026-06-03T09:00:00Z", storedTime);
+            assertEquals("2026-06-03 17:00:00", PatientValueFormatter.localDateTimeText(storedTime));
+        } finally {
+            TimeZone.setDefault(previous);
+        }
+    }
+
+    @Test
+    public void legacyUtcPlus8InfoTimeDisplaysAsBeijingTime() throws Exception {
+        TimeZone previous = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
+            File session = temporaryFolder.newFolder("ExperimentLegacyUtcPlus8", "Session_1710000000004");
+            File infoDir = new File(session, "info");
+            assertTrue(infoDir.mkdirs());
+            writeText(new File(infoDir, "subject_info_20260603.txt"),
+                    "姓名: 赵六\n病历号: MR004\n录制开始时间(UTC+8): 2026-06-03 17:00:00\n");
+
+            PatientRecordRepository.ScanResult result = new PatientRecordRepository(temporaryFolder.getRoot()).scanRecordsWithStatus();
+
+            assertFalse(result.hasError());
+            assertEquals(1, result.getRecords().size());
+            String storedTime = result.getRecords().get(0).getData().getRecordingStartTime();
+            assertEquals("2026-06-03T09:00:00Z", storedTime);
+            assertEquals("2026-06-03 17:00:00", PatientValueFormatter.localDateTimeText(storedTime));
+        } finally {
+            TimeZone.setDefault(previous);
+        }
+    }
+
+    @Test
     public void patientRecordRepositoryMigratesLegacyRecordEditsToPatientInfoJson() throws Exception {
         File root = temporaryFolder.newFolder("FacialCollectionLegacyEdit");
         File session = new File(root, "ExperimentLegacyEdit/Session_1710000000009");
@@ -487,6 +544,8 @@ public class PatientTemplateModelTest {
 
             assertEquals("2026-06-12 16:14:41",
                     PatientValueFormatter.localDateTimeText("2026-06-12T08:14:41Z"));
+            assertEquals("2026-06-12 16:14:41",
+                    PatientValueFormatter.localDateTimeText("2026-06-12T08:14:41.123Z"));
         } finally {
             TimeZone.setDefault(previous);
         }

@@ -3,6 +3,7 @@ package com.tsinghua.sample.patient.storage;
 import com.tsinghua.sample.patient.model.FieldValue;
 import com.tsinghua.sample.patient.model.PatientInfoData;
 import com.tsinghua.sample.patient.model.PatientJson;
+import com.tsinghua.sample.patient.model.PatientValueFormatter;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -252,12 +253,16 @@ public class PatientRecordRepository {
             putLegacyField(fields, "patientId", firstLegacyValue(text, "病历号", "患者ID", "患者ID:"));
             putLegacyField(fields, "legacyText", text.trim());
             String patientId = fields.containsKey("patientId") ? fields.get("patientId").asString() : "";
+            String recordingStartTime = legacyRecordingStartTime(text);
+            if (isBlank(recordingStartTime)) {
+                recordingStartTime = recordingTimeFromSessionName(session.getName());
+            }
             PatientInfoData data = new PatientInfoData(
                     LEGACY_TEMPLATE_ID,
                     LEGACY_TEMPLATE_NAME,
                     patientId,
                     session.getName(),
-                    recordingTimeFromSessionName(session.getName()),
+                    recordingStartTime,
                     "",
                     fields,
                     null
@@ -292,6 +297,20 @@ public class PatientRecordRepository {
                     return trimmed.substring(chinesePrefix.length()).trim();
                 }
             }
+        }
+        return "";
+    }
+
+    private static String legacyRecordingStartTime(String text) {
+        String utcPlus8 = firstLegacyValue(text, "录制开始时间(UTC+8)", "录制开始时间（UTC+8）", "录制开始时间(手机本地)");
+        String parsedUtcPlus8 = PatientValueFormatter.utcPlus8DateTimeToIsoInstant(utcPlus8);
+        if (!isBlank(parsedUtcPlus8)) {
+            return parsedUtcPlus8;
+        }
+
+        String utc = firstLegacyValue(text, "录制开始时间", "录制开始时间(UTC)", "录制开始时间（UTC）", "录制开始时间(原始UTC)");
+        if (PatientValueFormatter.isIsoInstant(nullToEmpty(utc).trim())) {
+            return utc.trim();
         }
         return "";
     }
