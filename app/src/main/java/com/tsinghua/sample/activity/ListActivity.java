@@ -57,6 +57,8 @@ import com.tsinghua.sample.activity.FrontCameraSettingsActivity;
 import com.tsinghua.sample.media.CameraFaceProcessor;
 import com.tsinghua.sample.media.CameraHelper;
 import com.tsinghua.sample.media.DeviceOrientation;
+import com.tsinghua.sample.media.sync.TimedDualRecorder;
+import com.tsinghua.sample.media.sync.DualRecordingResultWriter;
 import com.tsinghua.sample.media.CameraPureFaceProcessor;
 import com.tsinghua.sample.model.Device;
 import com.tsinghua.sample.utils.BLEService;
@@ -101,6 +103,8 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
     private RecyclerView recyclerView;
     private DeviceAdapter adapter;
     private DeviceOrientation deviceOrientation;
+    private TimedDualRecorder timedDualRecorder;
+    private boolean dualFinalizing;
 
     // 固定摄像头控制卡片（顶部）
     private com.google.android.material.card.MaterialCardView cameraControlCard;
@@ -1164,6 +1168,10 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
         // 设置自动停止回调（录制时长到达时通知UI）
         recordingCoordinator.setAutoStopCallback(() -> {
             runOnUiThread(() -> {
+                if (timedDualRecorder != null) {
+                    stopTimedDualRecording();
+                    return;
+                }
                 try {
                     // 先获取视频路径和目录信息（在停止相机之前）
                     String videoPath = null;
@@ -1267,6 +1275,11 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
     private void startAllRecording() {
         Log.d("ListActivity", "startAllRecording called, currentCameraMode=" + currentCameraMode);
 
+        if (dualFinalizing || timedDualRecorder != null) {
+            Toast.makeText(this, "双摄视频正在保存，请稍候", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
         // 检查是否正在进行后处理
         if (isPostProcessing) {
             Toast.makeText(this, "视频分析中，请等待完成后再开始新录制", Toast.LENGTH_SHORT).show();
@@ -1317,8 +1330,12 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
                 break;
             case 2:  // 前后同开
                 Log.d("ListActivity", "Mode 2: Starting BOTH cameras");
-                startFrontCameraRecording();
-                startBackCameraRecording();
+                if (!enableInference && Build.VERSION.SDK_INT >= 33) {
+                    startTimedDualRecording();
+                } else {
+                    startFrontCameraRecording();
+                    startBackCameraRecording();
+                }
                 break;
         }
 
@@ -1326,6 +1343,10 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
     }
 
     private void stopAllRecording() {
+        if (timedDualRecorder != null) {
+            stopTimedDualRecording();
+            return;
+        }
         // 先获取视频路径和目录信息（在停止相机之前）
         String videoPath = null;
         String frontDir = null;
@@ -1393,6 +1414,93 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
             startVideoPostProcessing(finalVideoPath, finalFrontDir, finalSpo2Dir);
         } else {
             // 不需要后处理，直接跳转到患者信息页面
+            navigateToPatientInfo();
+        }
+    }
+
+    @android.annotation.TargetApi(33)
+    private void startTimedDualRecording() {
+        showCameraPreview();
+        showPipPreview();
+        hideHeartRateLayout();
+        setCameraPlaceholderText("双摄准备中...");
+        try {
+            timedDualRecorder = new TimedDualRecorder(this, mainCameraSurfaceView,
+                    pipCameraSurfaceView, deviceOrientation, SessionManager.getInstance().getSessionDir(),
+                    new TimedDualRecorder.Listener() {
+                        @Override public void onStarted() {
+                            frontCameraActive = frontCameraRecording = true;
+                            backCameraActive = backCameraRecording = true;
+                            cameraRecordingIndicator.setVisibility(View.VISIBLE);
+                        }
+
+                        @Override public void onFinished(DualRecordingResultWriter.Result result) {
+                            TimedDualRecorder completed = timedDualRecorder;
+                            timedDualRecorder = null;
+                            dualFinalizing = false;
+                            if (recordingCoordinator != null && recordingCoordinator.isRecording()) {
+                                recordingCoordinator.stop();
+                            }
+                            frontCameraActive = frontCameraRecording = false;
+                            backCameraActive = backCameraRecording = false;
+                            if (isFinishing() || isDestroyed()) return;
+                            hideCameraPreview();
+                            hidePipPreview();
+                            btnStartAll.setEnabled(true);
+                            btnStartAll.setText("开始录制");
+                            statusText.setText(result.verified ? "双摄时间对应已验证" : "双摄时间对应未通过验证");
+                            setCameraPlaceholderText("点击开始录制显示预览");
+                            autoDisconnectRingAndEcgAfterStop();
+                            if (result.exportReady) {
+                                java.io.File exported = new java.io.File(result.report.getParentFile(), "inference/dual_sync");
+                                android.media.MediaScannerConnection.scanFile(ListActivity.this,
+                                        new String[]{new java.io.File(exported, "face.mp4").getAbsolutePath(),
+                                                new java.io.File(exported, "finger.mp4").getAbsolutePath()},
+                                        new String[]{"video/mp4", "video/mp4"}, null);
+                            }
+                            new AlertDialog.Builder(ListActivity.this)
+                                    .setTitle("双摄录制结果")
+                                    .setMessage(result.summary)
+                                    .setPositiveButton("继续", (dialog, which) -> finishDualSession(completed))
+                                    .setOnCancelListener(dialog -> finishDualSession(completed))
+                                    .show();
+                        }
+                    });
+            timedDualRecorder.start();
+        } catch (Exception e) {
+            if (timedDualRecorder != null) {
+                stopTimedDualRecording();
+            } else {
+                recordingCoordinator.stop();
+                hideCameraPreview();
+                hidePipPreview();
+                btnStartAll.setText("开始录制");
+                statusText.setText("双摄启动失败");
+            }
+            Toast.makeText(this, "无法启动可校验的双摄录制: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void stopTimedDualRecording() {
+        if (Build.VERSION.SDK_INT < 33) return;
+        if (dualFinalizing || timedDualRecorder == null) return;
+        dualFinalizing = true;
+        btnStartAll.setEnabled(false);
+        statusText.setText("正在保存双摄视频并核对时间...");
+        if (recordingCoordinator != null && recordingCoordinator.isRecording()) recordingCoordinator.stop();
+        timedDualRecorder.stop();
+    }
+
+    private void finishDualSession(TimedDualRecorder completed) {
+        if (Build.VERSION.SDK_INT < 33) { navigateToPatientInfo(); return; }
+        if (completed == null) { navigateToPatientInfo(); return; }
+        boolean quality = getSharedPreferences("AppSettings", MODE_PRIVATE)
+                .getBoolean("enable_quality_evaluation", false);
+        if (quality && new java.io.File(completed.getFrontVideoPath()).isFile()) {
+            java.io.File session = new java.io.File(completed.getFrontDir()).getParentFile();
+            startVideoPostProcessing(completed.getFrontVideoPath(), completed.getFrontDir(),
+                    new java.io.File(session, "spo2").getAbsolutePath());
+        } else {
             navigateToPatientInfo();
         }
     }
@@ -1959,6 +2067,10 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
     @Override
     protected void onDestroy() {
         deviceOrientation.disable();
+        if (Build.VERSION.SDK_INT >= 33 && timedDualRecorder != null) {
+            timedDualRecorder.stop();
+            if (recordingCoordinator != null && recordingCoordinator.isRecording()) recordingCoordinator.stop();
+        }
         // 停止所有摄像头
         stopFrontCameraRecording();
         stopBackCameraRecording();
