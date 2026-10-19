@@ -88,8 +88,11 @@ public class CameraFaceProcessor {
 
     // Context and lifecycle
     private Context activity;
+    private final DeviceOrientation deviceOrientation;
+    private int recordingRotation;
     static public String outDir;
     private boolean isCameraRunning = false;
+    private volatile boolean isCameraRequested = false;
 
     // Callbacks
     private CameraFaceProcessorCallback callback;
@@ -106,8 +109,8 @@ public class CameraFaceProcessor {
     private long recordingStartTimeNs = 0;  // 录制开始时间（纳秒）
     private static final int FRAME_RATE = 30;
     private static final int I_FRAME_INTERVAL = 1;
-    private static final int VIDEO_WIDTH = 480;  // 旋转后的宽度
-    private static final int VIDEO_HEIGHT = 640; // 旋转后的高度
+    private static final int VIDEO_WIDTH = 640;  // 保留相机原始像素方向
+    private static final int VIDEO_HEIGHT = 480;
     private final Object encoderLock = new Object();
 
     // 帧计数统计（用于调试）
@@ -154,9 +157,11 @@ public class CameraFaceProcessor {
         return isInitialized;
     }
 
-    public CameraFaceProcessor(Context activity, SurfaceView surfaceView, PlotView plotView)  {
+    public CameraFaceProcessor(Context activity, SurfaceView surfaceView, PlotView plotView,
+                               DeviceOrientation deviceOrientation)  {
 
         this.activity = activity;
+        this.deviceOrientation = deviceOrientation;
         this.surfaceView = surfaceView;
         this.callback = callback;
         this.plotView = plotView;
@@ -214,6 +219,7 @@ public class CameraFaceProcessor {
     }
 
     private void setupImageReader(int width, int height) {
+        if (imageReader != null) return;
         if (width > 0 && height > 0) {
             // 增加缓冲区数量从2到4，减少帧丢失
             imageReader = ImageReader.newInstance(640, 480, ImageFormat.JPEG, 4);
@@ -264,6 +270,7 @@ public class CameraFaceProcessor {
 
                 // 创建 Muxer
                 mediaMuxer = new MediaMuxer(currentVideoPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+                mediaMuxer.setOrientationHint(recordingRotation);
                 videoTrackIndex = -1;
                 muxerStarted = false;
                 recordingStartTimeNs = System.nanoTime();  // 记录开始时间
@@ -509,30 +516,41 @@ public class CameraFaceProcessor {
                     }
                 });
 
-                // 解码并旋转图像
+                // 视频保留原始像素方向，由 MP4 方向标记负责播放时的旋转。
                 Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
                 if (bitmap != null) {
-                    bitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true);
-                    Bitmap rotated = rotateBitmap(bitmap, 270);
-
-                    // 写入视频帧（即使模型未加载也录制）
-                    if (rotated != null && isRecording) {
-                        writeFrameToVideo(rotated);
-                    }
-
-                    // 模型未加载完成时跳过AI处理
-                    if (!isInitialized || facePreProcessor == null) {
-                        return;
-                    }
-
-                    long timestamp = System.nanoTime();
-                    faceMesh.send(rotated, timestamp);
-                    final Bitmap finalRotated = rotated;
-                    faceMesh.setResultListener(result -> {
-                        if (isCameraRunning) {
-                            facePreProcessor.addFrameResults(result, finalRotated.copy(Bitmap.Config.ARGB_8888, true));
+                    Bitmap aiBitmap = null;
+                    boolean submittedToAi = false;
+                    try {
+                        // writeFrameToVideo 同步复制位图，之后可释放解码结果。
+                        if (isRecording) {
+                            writeFrameToVideo(bitmap);
                         }
-                    });
+
+                        if (!isInitialized || facePreProcessor == null) {
+                            return;
+                        }
+
+                        // AI 仍接收正向图像；独立副本允许异步回调继续使用它。
+                        aiBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true);
+                        Bitmap rotated = rotateBitmap(aiBitmap, recordingRotation);
+                        if (rotated != aiBitmap) aiBitmap.recycle();
+                        aiBitmap = rotated;
+
+                        long timestamp = System.nanoTime();
+                        final Bitmap finalRotated = aiBitmap;
+                        submittedToAi = true;
+                        faceMesh.send(finalRotated, timestamp);
+                        faceMesh.setResultListener(result -> {
+                            if (isCameraRunning) {
+                                facePreProcessor.addFrameResults(result, finalRotated.copy(Bitmap.Config.ARGB_8888, true));
+                            }
+                        });
+                    } finally {
+                        bitmap.recycle();
+                        // 已提交的 AI 位图仍被异步结果监听器引用。
+                        if (!submittedToAi && aiBitmap != null) aiBitmap.recycle();
+                    }
                 }
             }
         } catch (Exception e) {
@@ -575,6 +593,10 @@ public class CameraFaceProcessor {
                 return;
             }
 
+            recordingRotation = deviceOrientation.videoRotation(cameraId);
+            CameraPreviewView.configure(surfaceView, manager.getCameraCharacteristics(cameraId),
+                    VIDEO_WIDTH, VIDEO_HEIGHT);
+            isCameraRequested = true;
             manager.openCamera(cameraId, stateCallback, backgroundHandler);
 
             // 异步加载模型（避免ANR）
@@ -636,6 +658,7 @@ public class CameraFaceProcessor {
     }
 
     public void stopCamera() {
+        isCameraRequested = false;
         isCameraRunning = false;
         isInitialized = false;
 
@@ -683,11 +706,16 @@ public class CameraFaceProcessor {
     private final CameraDevice.StateCallback stateCallback = new CameraDevice.StateCallback() {
         @Override
         public void onOpened(@NonNull CameraDevice camera) {
+            if (!isCameraRequested) {
+                camera.close();
+                return;
+            }
             cameraDevice = camera;
-            if (surfaceView.getWidth() > 0 && surfaceView.getHeight() > 0) {
+            CameraPreviewView.whenReady(surfaceView, () -> {
+                if (!isCameraRequested || cameraDevice != camera) return;
                 setupImageReader(surfaceView.getWidth(), surfaceView.getHeight());
                 createCameraPreview();
-            }
+            });
         }
 
         @Override
@@ -705,6 +733,8 @@ public class CameraFaceProcessor {
     };
 
     private void createCameraPreview() {
+        final CameraDevice previewCamera = cameraDevice;
+        if (!isCameraRequested || previewCamera == null) return;
         try {
             if (surfaceHolder == null || !surfaceHolder.getSurface().isValid()) {
                 Log.e(TAG, "SurfaceHolder is not valid.");
@@ -732,7 +762,10 @@ public class CameraFaceProcessor {
                     new CameraCaptureSession.StateCallback() {
                         @Override
                         public void onConfigured(@NonNull CameraCaptureSession session) {
-                            if (cameraDevice == null) return;
+                            if (!isCameraRequested || cameraDevice != previewCamera) {
+                                session.close();
+                                return;
+                            }
                             cameraCaptureSession = session;
                             updatePreview();
                             isCameraRunning = true;

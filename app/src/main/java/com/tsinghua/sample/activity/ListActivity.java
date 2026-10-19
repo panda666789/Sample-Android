@@ -11,6 +11,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
@@ -55,6 +56,7 @@ import com.tsinghua.sample.device.OximeterService;
 import com.tsinghua.sample.activity.FrontCameraSettingsActivity;
 import com.tsinghua.sample.media.CameraFaceProcessor;
 import com.tsinghua.sample.media.CameraHelper;
+import com.tsinghua.sample.media.DeviceOrientation;
 import com.tsinghua.sample.media.CameraPureFaceProcessor;
 import com.tsinghua.sample.model.Device;
 import com.tsinghua.sample.utils.BLEService;
@@ -98,6 +100,7 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
 
     private RecyclerView recyclerView;
     private DeviceAdapter adapter;
+    private DeviceOrientation deviceOrientation;
 
     // 固定摄像头控制卡片（顶部）
     private com.google.android.material.card.MaterialCardView cameraControlCard;
@@ -226,7 +229,13 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // Tablets can use their long-edge camera in landscape; phones keep the existing UI.
+        setRequestedOrientation(getResources().getConfiguration().smallestScreenWidthDp >= 600
+                ? ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+                : ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         setContentView(R.layout.activity_list);
+        CaptureLayoutController.attach(findViewById(R.id.captureLayoutRoot));
+        deviceOrientation = new DeviceOrientation(this);
 
         // 初始化全局时间基准（必须在所有数据采集模块之前）
         TimeSync.initializeGlobal();
@@ -973,7 +982,7 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
             String enableRecording = prefs.getString("video_format", "none");
             if (enableRecording.equals("none")) {
                 try {
-                    cameraPureFaceProcessor = new CameraPureFaceProcessor(this, mainCameraSurfaceView, cameraPlotViewHR);
+                    cameraPureFaceProcessor = new CameraPureFaceProcessor(this, mainCameraSurfaceView, cameraPlotViewHR, deviceOrientation);
                     // 设置心率回调以更新UI
                     cameraPureFaceProcessor.setOnHeartRateListener(heartRate -> {
                         runOnUiThread(() -> updateHeartRateDisplay(Math.round(heartRate)));
@@ -1017,7 +1026,7 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
                 }
             } else {
                 try {
-                    cameraFaceProcessor = new CameraFaceProcessor(this, mainCameraSurfaceView, cameraPlotViewHR);
+                    cameraFaceProcessor = new CameraFaceProcessor(this, mainCameraSurfaceView, cameraPlotViewHR, deviceOrientation);
                     // 设置心率回调以更新UI
                     cameraFaceProcessor.setOnHeartRateListener(heartRate -> {
                         runOnUiThread(() -> updateHeartRateDisplay(Math.round(heartRate)));
@@ -1074,7 +1083,7 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
                     frontCameraHelper = null;
                 }
                 Log.d("Camera", "Creating new CameraHelper for front camera");
-                frontCameraHelper = new CameraHelper(this, mainCameraSurfaceView, null);
+                frontCameraHelper = new CameraHelper(this, mainCameraSurfaceView, null, deviceOrientation);
                 Log.d("Camera", "CameraHelper created, waiting for camera ready...");
                 // 轮询等待摄像头就绪，最多等待5秒
                 waitForCameraReady(frontCameraHelper, true, 50, () -> {
@@ -1645,7 +1654,7 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
                     backCameraHelper.release();
                     backCameraHelper = null;
                 }
-                backCameraHelper = new CameraHelper(this, null, targetSurface);
+                backCameraHelper = new CameraHelper(this, null, targetSurface, deviceOrientation);
 
                 // 设置双摄模式标志（只在双摄模式下开启闪光灯）
                 backCameraHelper.setDualCameraMode(isDualMode);
@@ -1919,6 +1928,7 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
     @Override
     protected void onResume() {
         super.onResume();
+        deviceOrientation.enable();
 
         // 检查是否需要加载AI模型（用户可能在设置中开启了推理）
         SharedPreferences prefs = getSharedPreferences("AppSettings", MODE_PRIVATE);
@@ -1941,7 +1951,14 @@ public class ListActivity extends AppCompatActivity implements IResponseListener
     }
 
     @Override
+    protected void onPause() {
+        deviceOrientation.disable();
+        super.onPause();
+    }
+
+    @Override
     protected void onDestroy() {
+        deviceOrientation.disable();
         // 停止所有摄像头
         stopFrontCameraRecording();
         stopBackCameraRecording();

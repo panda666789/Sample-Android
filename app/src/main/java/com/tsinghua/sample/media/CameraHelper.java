@@ -52,13 +52,14 @@ public class CameraHelper {
         return backPreviewReady;
     }
 
-    public CameraHelper(Context context, SurfaceView surfaceViewFront, SurfaceView surfaceViewBack) {
+    public CameraHelper(Context context, SurfaceView surfaceViewFront, SurfaceView surfaceViewBack,
+                        DeviceOrientation deviceOrientation) {
         Log.d(TAG, "CameraHelper constructor: front=" + surfaceViewFront + ", back=" + surfaceViewBack);
         this.context = context;
         this.surfaceViewFront = surfaceViewFront;
         this.surfaceViewBack = surfaceViewBack;
-        this.recorderHelperFront = new RecorderHelper(this, context);
-        this.recorderHelperBack = new RecorderHelper(this, context);
+        this.recorderHelperFront = new RecorderHelper(this, context, deviceOrientation);
+        this.recorderHelperBack = new RecorderHelper(this, context, deviceOrientation);
 
         this.cameraManager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
 
@@ -70,6 +71,8 @@ public class CameraHelper {
         // 先初始化相机ID
         initializeCameras();
         Log.d(TAG, "Camera IDs initialized: front=" + cameraIdFront + ", back=" + cameraIdBack);
+        configurePreview(surfaceViewFront, cameraIdFront);
+        configurePreview(surfaceViewBack, cameraIdBack);
 
         if (surfaceViewFront != null && !frontCallbackAdded) {
             Log.d(TAG, "Adding front surface callback");
@@ -111,6 +114,16 @@ public class CameraHelper {
             }
         } catch (CameraAccessException e) {
             e.printStackTrace();
+        }
+    }
+
+    private void configurePreview(SurfaceView view, String cameraId) {
+        if (view == null || cameraId == null) return;
+        try {
+            CameraPreviewView.configure(view, cameraManager.getCameraCharacteristics(cameraId),
+                    1920, 1080);
+        } catch (CameraAccessException e) {
+            Log.e(TAG, "Failed to configure camera preview: " + cameraId, e);
         }
     }
 
@@ -257,15 +270,21 @@ public class CameraHelper {
                     }
                     if (isFront) {
                         cameraDeviceFront = camera;
-                        if (surfaceViewFront != null && surfaceViewFront.getHolder().getSurface() != null
-                                && surfaceViewFront.getHolder().getSurface().isValid()) {
-                            startPreview(cameraDeviceFront, surfaceViewFront.getHolder().getSurface(), true);
+                        if (surfaceViewFront != null) {
+                            CameraPreviewView.whenReady(surfaceViewFront, () -> {
+                                if (!isClosed && cameraDeviceFront == camera) {
+                                    startPreview(camera, surfaceViewFront.getHolder().getSurface(), true);
+                                }
+                            });
                         }
                     } else {
                         cameraDeviceBack = camera;
-                        if (surfaceViewBack != null && surfaceViewBack.getHolder().getSurface() != null
-                                && surfaceViewBack.getHolder().getSurface().isValid()) {
-                            startPreview(cameraDeviceBack, surfaceViewBack.getHolder().getSurface(), false);
+                        if (surfaceViewBack != null) {
+                            CameraPreviewView.whenReady(surfaceViewBack, () -> {
+                                if (!isClosed && cameraDeviceBack == camera) {
+                                    startPreview(camera, surfaceViewBack.getHolder().getSurface(), false);
+                                }
+                            });
                         }
                     }
                 }

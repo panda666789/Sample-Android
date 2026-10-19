@@ -37,6 +37,7 @@ public class RecorderHelper {
     private static final String TAG = "RecorderHelper";
     private final CameraHelper cameraHelper;
     private final Context context;
+    private final DeviceOrientation deviceOrientation;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private MediaRecorder mediaRecorderFront, mediaRecorderBack;
@@ -56,9 +57,11 @@ public class RecorderHelper {
     // 双摄模式标志，用于控制闪光灯
     private boolean isDualCameraMode = false;
 
-    public RecorderHelper(CameraHelper cameraHelper, Context context) {
+    public RecorderHelper(CameraHelper cameraHelper, Context context,
+                          DeviceOrientation deviceOrientation) {
         this.cameraHelper = cameraHelper;
         this.context = context;
+        this.deviceOrientation = deviceOrientation;
     }
 
     /**
@@ -103,7 +106,7 @@ public class RecorderHelper {
             Log.e(TAG, "init front metadata recorder failed", e);
         }
 
-        setupMediaRecorder(currentFrontVideoPath, true, 270);
+        setupMediaRecorder(currentFrontVideoPath, true);
 
         if (cameraHelper.getSurfaceViewFront() == null) {
             Log.e(TAG, "Front SurfaceView is null");
@@ -213,7 +216,7 @@ public class RecorderHelper {
             Log.e(TAG, "init back metadata recorder failed", e);
         }
 
-        setupMediaRecorder(backOutputFile.getAbsolutePath(), false, 90);
+        setupMediaRecorder(backOutputFile.getAbsolutePath(), false);
 
         if (cameraHelper.getSurfaceViewBack() == null) {
             Log.e(TAG, "Back SurfaceView is null");
@@ -371,9 +374,12 @@ public class RecorderHelper {
         return result;
     }
 
-    private void setupMediaRecorder(String outputPath, boolean isFront, int rotate) {
+    private void setupMediaRecorder(String outputPath, boolean isFront) {
         MediaRecorder recorder = new MediaRecorder();
         try {
+            CameraDevice camera = isFront ? cameraHelper.getCameraDeviceFront()
+                    : cameraHelper.getCameraDeviceBack();
+            int rotate = deviceOrientation.videoRotation(camera.getId());
             AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
             AudioDeviceInfo[] devices = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS);
             for (AudioDeviceInfo d : devices) {
@@ -406,7 +412,7 @@ public class RecorderHelper {
 
             if (isFront) mediaRecorderFront = recorder;
             else mediaRecorderBack = recorder;
-        } catch (IOException e) {
+        } catch (IOException | CameraAccessException e) {
             Log.e(TAG, "MediaRecorder prepare failed", e);
             recorder.release();
             throw new RuntimeException("MediaRecorder prepare failed", e);

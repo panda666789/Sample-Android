@@ -87,8 +87,11 @@ public class CameraPureFaceProcessor {
 
     // Context and lifecycle
     private Context activity;
+    private final DeviceOrientation deviceOrientation;
+    private int recordingRotation;
     static public String outDir;
     private boolean isCameraRunning = false;
+    private volatile boolean isCameraRequested = false;
 
     // Callbacks
     private CameraFaceProcessorCallback callback;
@@ -176,9 +179,11 @@ public class CameraPureFaceProcessor {
         return isInitialized;
     }
 
-    public CameraPureFaceProcessor(Context activity, SurfaceView surfaceView, PlotView plotView)  {
+    public CameraPureFaceProcessor(Context activity, SurfaceView surfaceView, PlotView plotView,
+                                   DeviceOrientation deviceOrientation)  {
 
         this.activity = activity;
+        this.deviceOrientation = deviceOrientation;
         this.surfaceView = surfaceView;
         this.callback = callback;
         this.plotView = plotView;
@@ -261,6 +266,7 @@ public class CameraPureFaceProcessor {
     }
 
     private void setupImageReader(int width, int height) {
+        if (imageReader != null) return;
         if (width > 0 && height > 0) {
             imageReader = ImageReader.newInstance(640, 480, ImageFormat.YUV_420_888, 4);
             imageReader.setOnImageAvailableListener(onImageAvailableListener, backgroundHandler);
@@ -320,9 +326,8 @@ public class CameraPureFaceProcessor {
 
                 // 创建 Muxer
                 mediaMuxer = new MediaMuxer(currentVideoPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
-                // 设置视频旋转角度（前置摄像头需要270度旋转）
-                // 这样播放器会自动旋转视频，而不需要在编码时旋转
-                mediaMuxer.setOrientationHint(270);
+                // 使用本次录制开始时的方向，编码期间保持原始像素布局。
+                mediaMuxer.setOrientationHint(recordingRotation);
                 videoTrackIndex = -1;
                 muxerStarted = false;
                 recordingStartTimeNs = System.nanoTime();  // 记录开始时间
@@ -767,7 +772,7 @@ public class CameraPureFaceProcessor {
                     isAIProcessing = true;
 
                     // 只有需要 AI 处理时才创建 Bitmap
-                    Bitmap bitmap = convertYUVToBitmap(image, 270);
+                    Bitmap bitmap = convertYUVToBitmap(image, recordingRotation);
                     if (bitmap != null) {
                         // 回收旧的pending bitmap（如果有的话）
                         synchronized (bitmapLock) {
@@ -833,6 +838,10 @@ public class CameraPureFaceProcessor {
                 return;
             }
 
+            recordingRotation = deviceOrientation.videoRotation(cameraId);
+            CameraPreviewView.configure(surfaceView, manager.getCameraCharacteristics(cameraId),
+                    VIDEO_WIDTH, VIDEO_HEIGHT);
+            isCameraRequested = true;
             manager.openCamera(cameraId, stateCallback, backgroundHandler);
 
             // 如果已经预加载模型，跳过异步加载，但更新日志路径到 front 目录
@@ -878,9 +887,12 @@ public class CameraPureFaceProcessor {
                     // 通知初始化完成，并启动视频编码器
                     mainHandler.post(() -> {
                         // 模型加载完成后再启动视频编码器，确保质量评估统计完整
-                        resetQualityEvaluator();  // 重置质量评估器
-                        setupVideoEncoder();
-                        Log.d(TAG, "视频编码器已启动（模型加载后）");
+                        if (!isCameraRequested) return;
+                        if (!isRecording) {
+                            resetQualityEvaluator();  // 重置质量评估器
+                            setupVideoEncoder();
+                            Log.d(TAG, "视频编码器已启动（模型加载后）");
+                        }
 
                         if (initListener != null) {
                             initListener.onInitialized();
@@ -906,6 +918,7 @@ public class CameraPureFaceProcessor {
     }
 
     public void stopCamera() {
+        isCameraRequested = false;
         isCameraRunning = false;
         isInitialized = false;
 
@@ -978,11 +991,16 @@ public class CameraPureFaceProcessor {
     private final CameraDevice.StateCallback stateCallback = new CameraDevice.StateCallback() {
         @Override
         public void onOpened(@NonNull CameraDevice camera) {
+            if (!isCameraRequested) {
+                camera.close();
+                return;
+            }
             cameraDevice = camera;
-            if (surfaceView.getWidth() > 0 && surfaceView.getHeight() > 0) {
+            CameraPreviewView.whenReady(surfaceView, () -> {
+                if (!isCameraRequested || cameraDevice != camera) return;
                 setupImageReader(surfaceView.getWidth(), surfaceView.getHeight());
                 createCameraPreview();
-            }
+            });
         }
 
         @Override
@@ -1000,6 +1018,8 @@ public class CameraPureFaceProcessor {
     };
 
     private void createCameraPreview() {
+        final CameraDevice previewCamera = cameraDevice;
+        if (!isCameraRequested || previewCamera == null) return;
         try {
             if (surfaceHolder == null || !surfaceHolder.getSurface().isValid()) {
                 Log.e(TAG, "SurfaceHolder is not valid.");
@@ -1011,7 +1031,7 @@ public class CameraPureFaceProcessor {
 
             // 如果模型已经预加载完成（setPreloadedEstimator），立即启动视频编码器
             // 否则等待异步加载完成后再启动
-            if (isInitialized && facePreProcessor != null) {
+            if (isInitialized && facePreProcessor != null && !isRecording) {
                 resetQualityEvaluator();
                 setupVideoEncoder();
                 Log.d(TAG, "视频编码器已启动（预加载模型）");
@@ -1032,7 +1052,10 @@ public class CameraPureFaceProcessor {
                     new CameraCaptureSession.StateCallback() {
                         @Override
                         public void onConfigured(@NonNull CameraCaptureSession session) {
-                            if (cameraDevice == null) return;
+                            if (!isCameraRequested || cameraDevice != previewCamera) {
+                                session.close();
+                                return;
+                            }
                             cameraCaptureSession = session;
                             updatePreview();
                             isCameraRunning = true;
