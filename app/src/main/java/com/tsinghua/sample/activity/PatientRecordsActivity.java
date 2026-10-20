@@ -39,6 +39,7 @@ import com.tsinghua.sample.patient.storage.PatientRecordRepository;
 import com.tsinghua.sample.patient.storage.PatientStoragePaths;
 import com.tsinghua.sample.patient.storage.TemplateRepository;
 import com.tsinghua.sample.patient.ui.GroupedUi;
+import com.tsinghua.sample.patient.ui.SessionDirectoryNavigator;
 
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -60,6 +61,7 @@ public class PatientRecordsActivity extends AppCompatActivity {
     private TemplateRepository templateRepository;
     private String scanErrorMessage;
     private ICD10Catalog icd10Catalog;
+    private SessionDirectoryNavigator directoryNavigator;
 
     public static void start(Context context) {
         context.startActivity(new Intent(context, PatientRecordsActivity.class));
@@ -72,6 +74,7 @@ public class PatientRecordsActivity extends AppCompatActivity {
         recordRepository = PatientStoragePaths.patientRecordRepository();
         templateRepository = PatientStoragePaths.templateRepository(this);
         icd10Catalog = new ICD10Catalog(null);
+        directoryNavigator = new SessionDirectoryNavigator(this);
         buildLayout();
         loadRecords();
         loadIcd10CatalogAsync();
@@ -81,7 +84,7 @@ public class PatientRecordsActivity extends AppCompatActivity {
         LinearLayout root = new LinearLayout(this);
         setContentView(GroupedUi.scrollRoot(this, root));
 
-        root.addView(GroupedUi.pageHeader(this, "患者记录", "搜索、查看并编辑已保存的患者信息"));
+        root.addView(GroupedUi.pageHeader(this, "患者记录", "查看患者信息，打开对应会话目录检查录制视频"));
 
         searchInput = new EditText(this);
         searchInput.setHint("搜索病例号或姓名");
@@ -144,6 +147,10 @@ public class PatientRecordsActivity extends AppCompatActivity {
         content.addView(GroupedUi.metaRow(this, "模板", record.getData().getTemplateName()));
         content.addView(GroupedUi.metaRow(this, "录制开始(UTC+8)", PatientValueFormatter.utcPlus8DateTimeText(record.getData().getRecordingStartTime())));
         content.addView(GroupedUi.metaRow(this, "填写情况", "已填写 " + filledCount(record.getData()) + " 项"));
+
+        MaterialButton openDirectory = GroupedUi.secondaryButton(this, "打开会话目录");
+        openDirectory.setOnClickListener(v -> directoryNavigator.show(record));
+        content.addView(openDirectory, GroupedUi.matchWrap(this));
 
         LinearLayout actions = new LinearLayout(this);
         actions.setGravity(Gravity.END);
